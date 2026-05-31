@@ -25,7 +25,23 @@ http:
     - "*.mcdn.bilivideo.cn:8082"
     - "upos-sz-mirror*bstar1.bilivideo.com"
     - "upos-*-mirrorakam.akamaized.net"
+    - "app.bilibili.com"
+    - "app.biliapi.net"
+    - "api.bilibili.com"
+    - "api.biliapi.net"
+    - "grpc.biliapi.net"
   script:
+    - match: ^https?:\/\/(grpc\.biliapi\.net|app\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.playerunite\.v1\.Player\/PlayViewUnite$
+      name: "📺 BiliBili.Redirect.response"
+      type: response
+      require-body: true
+      binary-mode: true
+      argument:
+    - match: ^https?:\/\/api\.bili(bili\.com|api\.net)\/(x\/player\/(wbi\/)?playurl|pgc\/player\/(api|web)\/playurl(\/html5)?|pgc\/player\/web\/v2\/playurl)\?
+      name: "📺 BiliBili.Redirect.response"
+      type: response
+      require-body: true
+      argument:
     - match: ^https?:\/\/.+\.bilivideo\.com\/upgcxcode\/
       name: "📺 BiliBili.Redirect.request"
       type: request
@@ -46,6 +62,9 @@ http:
       type: request
       argument:
 script-providers:
+  "📺 BiliBili.Redirect.response":
+    url: https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/response.bundle.js
+    interval: 86400
   "📺 BiliBili.Redirect.request":
     url: https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/request.bundle.js
     interval: 86400

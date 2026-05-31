@@ -16,6 +16,8 @@
 force-http-engine-hosts = %APPEND% *:4480, *:4483, *:8000, *:8082, *:9102
 
 [Script]
+📺 BiliBili.Redirect.PlayerUnite.PlayViewUnite.grpc = type=http-response, pattern=^https?:\/\/(grpc\.biliapi\.net|app\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.playerunite\.v1\.Player\/PlayViewUnite$, requires-body=1, binary-body-mode=1, engine=webview, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/response.bundle.js, argument={{{scriptParams}}}
+📺 BiliBili.Redirect.Player.playurl.json = type=http-response, pattern=^https?:\/\/api\.bili(bili\.com|api\.net)\/(x\/player\/(wbi\/)?playurl|pgc\/player\/(api|web)\/playurl(\/html5)?|pgc\/player\/web\/v2\/playurl)\?, requires-body=1, engine=webview, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/response.bundle.js, argument={{{scriptParams}}}
 📺 BiliBili.Redirect.CDN.upgcxcode.m4s = type=http-request, pattern=^https?:\/\/.+\.bilivideo\.com\/upgcxcode\/, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/request.bundle.js, argument={{{scriptParams}}}
 📺 BiliBili.Redirect.MCDN.v1.resource.m4s = type=http-request, pattern=^https?:\/\/[adbcefxy0-9]+\.mcdn\.bilivideo\.cn(:(8000|8082))?\/v1\/resource\/, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/request.bundle.js, argument={{{scriptParams}}}
 📺 BiliBili.Redirect.MCDN.upgcxcode.m4s = type=http-request, pattern=^https?:\/\/[adbcefxy0-9]+\.mcdn\.bilivideo\.cn(:(4483|9102))?\/upgcxcode\/, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/request.bundle.js, argument={{{scriptParams}}}
@@ -23,4 +25,4 @@ force-http-engine-hosts = %APPEND% *:4480, *:4483, *:8000, *:8082, *:9102
 📺 BiliBili.Redirect.Akamaized.upgcxcode.m4s = type=http-request, pattern=^https?:\/\/upos-(hz|bstar1)-mirrorakam\.akamaized\.net/upgcxcode\/, script-path=https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/download/v{{@package 'version'}}/request.bundle.js, argument={{{scriptParams}}}
 
 [MITM]
-hostname = %APPEND% *.mcdn.bilivideo.cn, upos-sz-mirror*bstar1.bilivideo.com, upos-*-mirrorakam.akamaized.net
+hostname = %APPEND% *.mcdn.bilivideo.cn, upos-sz-mirror*bstar1.bilivideo.com, upos-*-mirrorakam.akamaized.net, app.bilibili.com, app.biliapi.net, api.bilibili.com, api.biliapi.net, grpc.biliapi.net

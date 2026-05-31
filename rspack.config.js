@@ -6,6 +6,7 @@ import pkg from "./package.json" with { type: "json" };
 export default defineConfig({
 	entry: {
 		"request": "./src/request.js",
+		"response": "./src/response.js",
 	},
 	output: {
 		chunkFormat: false,

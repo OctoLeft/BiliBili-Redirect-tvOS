@@ -1,6 +1,6 @@
 {
 	"name": "@octoleft/bilibili-redirect-tvos",
-	"version": "0.2.20-tvos.2",
+	"version": "0.2.20-tvos.3",
 	"organizationName": "OctoLeft / BiliUniverse",
 	"displayName": "📺 BiliBili: 🔀 Redirect tvOS CNHK",
 	"description": "哔哩哔哩：tvOS Akamai CDN 重定向至 CNHK\n基于 BiliUniverse Redirect",
