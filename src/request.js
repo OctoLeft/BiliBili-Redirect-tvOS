@@ -85,6 +85,9 @@ function isTVOSCNHKAkamaiURL(url, Settings) {
 }
 
 function prepareTVOSAkamaiRequest(url, Settings) {
+	const redirectMode = Settings.TVOS?.RedirectMode || "response-only";
+	if (redirectMode === "response-only") return;
+
 	const signedParams = getSignedParamNames(url);
 	url.protocol = "http:";
 	url.hostname = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
@@ -92,7 +95,7 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 	if (!signedParams.has("build") && (!url.searchParams.get("build") || url.searchParams.get("build") === "0")) url.searchParams.set("build", Settings.TVOS?.Build || "89600100");
 	if (!signedParams.has("nettype") && (!url.searchParams.get("nettype") || url.searchParams.get("nettype") === "0")) url.searchParams.set("nettype", "1");
 	applyTVOSCNHKHeaders(Settings);
-	switch (Settings.TVOS?.RedirectMode) {
+	switch (redirectMode) {
 		case "request-rewrite":
 			break;
 		case "response-307":
@@ -105,7 +108,6 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 			};
 			break;
 		case "response-302":
-		default:
 			$response = {
 				status: 302,
 				headers: {
@@ -113,6 +115,8 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 					"Cache-Control": "no-store",
 				},
 			};
+			break;
+		default:
 			break;
 	}
 }
@@ -217,7 +221,7 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 				case "upos-sz-mirror08h.bilivideo.com": // 华为云 CDN，融合 CDN
 				case "upos-sz-mirror08ct.bilivideo.com": // 华为云 CDN，融合 CDN
 				break;
-				case "upos-hz-mirrorakam.akamaized.net": // tvOS Akamai CDN，保留签名参数，仅补齐客户端字段后重定向至 CNHK。
+				case "upos-hz-mirrorakam.akamaized.net": // tvOS Akamai CDN，默认仅依赖响应阶段选择已签名 CNHK backup。
 					prepareTVOSAkamaiRequest(url, Settings);
 					break;
 				case "upos-sz-mirrorawsov.bilivideo.com": // AWS CDN，海外

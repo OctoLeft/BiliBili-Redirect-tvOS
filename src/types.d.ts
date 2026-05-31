@@ -136,18 +136,19 @@ export interface Settings {
     /**
          * [tvOS] Akamai 重定向方式
          *
-         * 选择 tvOS Akamai 请求重定向至 CNHK 的方式。默认使用 302，让客户端最终 URL 明确变成 CNHK。
+         * 选择 tvOS Akamai 请求重定向至 CNHK 的方式。默认只使用播放地址响应中服务端已签好的 CNHK backup URL。
          *
          * @remarks
          *
          * Possible values:
-         * - `'response-302'` - 302 跳转
-         * - `'response-307'` - 307 跳转
-         * - `'request-rewrite'` - 透明改写请求
+         * - `'response-only'` - 仅使用已签名 backup
+         * - `'response-302'` - 强制 302 跳转
+         * - `'response-307'` - 强制 307 跳转
+         * - `'request-rewrite'` - 强制透明改写请求
          *
-         * @defaultValue "response-302"
+         * @defaultValue "response-only"
          */
-        RedirectMode?: 'response-302' | 'response-307' | 'request-rewrite';
+        RedirectMode?: 'response-only' | 'response-302' | 'response-307' | 'request-rewrite';
 };
     /**
      * [储存] 配置类型
