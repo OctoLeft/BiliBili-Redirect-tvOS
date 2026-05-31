@@ -1,14 +1,16 @@
 {
-	"name": "@biliuniverse/redirect",
-	"organizationName": "🪐 BiliUniverse",
-	"displayName": "📺 BiliBili: 🔀 Redirect",
-	"description": "哔哩哔哩：重定向\n中国站CDN自定义",
-	"homepage": "https://Redirect.BiliUniverse.io",
+	"name": "@octoleft/bilibili-redirect-tvos",
+	"version": "0.2.20-tvos.1",
+	"organizationName": "OctoLeft / BiliUniverse",
+	"displayName": "📺 BiliBili: 🔀 Redirect tvOS CNHK",
+	"description": "哔哩哔哩：tvOS Akamai CDN 重定向至 CNHK\n基于 BiliUniverse Redirect",
+	"homepage": "https://github.com/OctoLeft/BiliBili-Redirect-tvOS",
 	"openUrl": "http://boxjs.com/#/app/BiliBili.Redirect",
-	"icon": "https://github.com/BiliUniverse/Redirect/raw/main/src/assets/icon_rounded.png",
+	"icon": "https://github.com/OctoLeft/BiliBili-Redirect-tvOS/raw/main/src/assets/icon_rounded.png",
 	"keywords": [],
 	"contributors": [
-		"VirgilClyne[https://github.com/VirgilClyne]"
+		"VirgilClyne[https://github.com/VirgilClyne]",
+		"OctoLeft[https://github.com/OctoLeft]"
 	],
 	"system": [
 		"iOS",
@@ -21,7 +23,7 @@
 	"type": "module",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/BiliUniverse/Redirect.git"
+		"url": "https://github.com/OctoLeft/BiliBili-Redirect-tvOS.git"
 	},
 	"directories": {
 		"example": "example"

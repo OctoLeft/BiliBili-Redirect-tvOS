@@ -15,6 +15,76 @@ Console.info(`PATHs: ${PATHs}`);
 // 解析格式
 const FORMAT = ($request.headers?.["Content-Type"] ?? $request.headers?.["content-type"])?.split(";")?.[0];
 Console.info(`FORMAT: ${FORMAT}`);
+
+const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
+
+function getHeaderKey(headers, name) {
+	const lowerName = name.toLowerCase();
+	return Object.keys(headers ?? {}).find(key => key.toLowerCase() === lowerName);
+}
+
+function setHeader(headers, name, value) {
+	const key = getHeaderKey(headers, name) ?? name;
+	headers[key] = value;
+}
+
+function deleteHeader(headers, name) {
+	const key = getHeaderKey(headers, name);
+	if (key) delete headers[key];
+}
+
+function readPersistentValue(key) {
+	try {
+		if (typeof $persistentStore === "undefined") return "";
+		return $persistentStore.read(key) ?? "";
+	} catch (e) {
+		Console.warn(`读取持久化缓存失败: ${e}`);
+		return "";
+	}
+}
+
+function writePersistentValue(key, value) {
+	try {
+		if (typeof $persistentStore === "undefined") return;
+		$persistentStore.write(value, key);
+	} catch (e) {
+		Console.warn(`写入持久化缓存失败: ${e}`);
+	}
+}
+
+function randomAlphaNumeric(length) {
+	const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	let value = "";
+	for (let i = 0; i < length; i++) value += chars[Math.floor(Math.random() * chars.length)];
+	return value;
+}
+
+function getTVOSBuvid(Settings) {
+	const configuredBuvid = Settings.TVOS?.Buvid?.trim();
+	if (configuredBuvid) return configuredBuvid;
+	const cachedBuvid = readPersistentValue(TVOS_BUVID_CACHE_KEY);
+	if (cachedBuvid) return cachedBuvid;
+	const generatedBuvid = `YF${randomAlphaNumeric(42)}`;
+	writePersistentValue(TVOS_BUVID_CACHE_KEY, generatedBuvid);
+	return generatedBuvid;
+}
+
+function getSignedParamNames(url) {
+	return new Set((url.searchParams.get("uparams") ?? "").split(",").filter(Boolean));
+}
+
+function prepareTVOSAkamaiRequest(url, Settings) {
+	const signedParams = getSignedParamNames(url);
+	url.protocol = "http:";
+	url.hostname = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
+	if (!signedParams.has("buvid") && !url.searchParams.get("buvid")) url.searchParams.set("buvid", getTVOSBuvid(Settings));
+	if (!signedParams.has("build") && (!url.searchParams.get("build") || url.searchParams.get("build") === "0")) url.searchParams.set("build", Settings.TVOS?.Build || "89600100");
+	if (!signedParams.has("nettype") && (!url.searchParams.get("nettype") || url.searchParams.get("nettype") === "0")) url.searchParams.set("nettype", "1");
+	if (!$request.headers) $request.headers = {};
+	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
+	deleteHeader($request.headers, "Referer");
+}
+
 (async () => {
 	/**
 	 * 设置
@@ -115,7 +185,9 @@ Console.info(`FORMAT: ${FORMAT}`);
 				case "upos-sz-mirror08h.bilivideo.com": // 华为云 CDN，融合 CDN
 				case "upos-sz-mirror08ct.bilivideo.com": // 华为云 CDN，融合 CDN
 				break;
-				case "upos-hz-mirrorakam.akamaized.net": // Akamai CDN，海外，有参数校验，其他类型的 CDN 不能直接替换为此 Host。但反过来可以。
+				case "upos-hz-mirrorakam.akamaized.net": // tvOS Akamai CDN，保留签名参数，仅补齐客户端字段后重定向至 CNHK。
+					prepareTVOSAkamaiRequest(url, Settings);
+					break;
 				case "upos-sz-mirrorawsov.bilivideo.com": // AWS CDN，海外
 				case "upos-sz-mirroraliov.bilivideo.com": // 阿里云 CDN，海外
 				case "upos-sz-mirrorcosov.bilivideo.com": // 腾讯云 CDN，海外
@@ -204,7 +276,8 @@ Console.info(`FORMAT: ${FORMAT}`);
 		case "TRACE":
 			break;
 	}
-	if ($request.headers?.Host) $request.headers.Host = url.host;
+	if (!$request.headers) $request.headers = {};
+	setHeader($request.headers, "Host", url.host);
 	if ($request.headers?.[":authority"]) $request.headers[":authority"] = url.host;
 	$request.url = url.toString();
 	Console.debug(`$request.url: ${$request.url}`);

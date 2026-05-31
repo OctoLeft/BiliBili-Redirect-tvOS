@@ -1,20 +1,51 @@
 import { defineConfig } from "@iringo/arguments-builder";
 
+const cnhkHostOptions = [
+	{
+		"key": "cn-hk-eq-01-01.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-03.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-09.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-10.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-12.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-13.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	},
+	{
+		"key": "cn-hk-eq-01-14.bilivideo.com",
+		"label": "Equinix IX CDN，香港"
+	}
+];
+
 export default defineConfig({
 	output: {
 		surge: {
-			path: "./dist/BiliBili.Redirect.sgmodule",
+			path: "./dist/BiliBili.Redirect.tvOS.sgmodule",
 			transformEgern: {
 				enable: true,
-				path: "./dist/BiliBili.Redirect.yaml",
+				path: "./dist/BiliBili.Redirect.tvOS.yaml",
 			},
 		},
 		loon: {
-			path: "./dist/BiliBili.Redirect.plugin",
+			path: "./dist/BiliBili.Redirect.tvOS.plugin",
 		},
 		customItems: [
 			{
-				path: "./dist/BiliBili.Redirect.stoverride",
+				path: "./dist/BiliBili.Redirect.tvOS.stoverride",
 				template: "./template/stash.handlebars",
 			},
 		],
@@ -89,6 +120,36 @@ export default defineConfig({
 					"label": "Equinix IX CDN，香港"
 				}
 			],
+		},
+		{
+			key: "Host.AkamaiCNHK",
+			name: "[主机名] 重定向 tvOS Akamai CDN (港澳台)",
+			defaultValue: "cn-hk-eq-01-03.bilivideo.com",
+			type: "string",
+			boxJsType: "selects",
+			description: "请选择 tvOS Akamai CDN 要重定向的 CNHK 主机名。",
+			options: cnhkHostOptions,
+		},
+		{
+			key: "TVOS.Build",
+			name: "[tvOS] 客户端构建号",
+			defaultValue: "89600100",
+			type: "string",
+			description: "当 tvOS Akamai 请求的 build 为空或为 0 时使用的构建号。",
+		},
+		{
+			key: "TVOS.UserAgent",
+			name: "[tvOS] User-Agent",
+			defaultValue: "Bilibili Freedoooooom/MarkII",
+			type: "string",
+			description: "tvOS Akamai 请求重定向至 CNHK 时使用的 User-Agent。",
+		},
+		{
+			key: "TVOS.Buvid",
+			name: "[tvOS] Buvid",
+			defaultValue: "",
+			type: "string",
+			description: "可选。留空时脚本会在本机生成并持久化随机 buvid。",
 		},
 		{
 			key: "Host.BStar",
