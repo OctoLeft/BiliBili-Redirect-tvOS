@@ -73,6 +73,17 @@ function getSignedParamNames(url) {
 	return new Set((url.searchParams.get("uparams") ?? "").split(",").filter(Boolean));
 }
 
+function applyTVOSCNHKHeaders(Settings) {
+	if (!$request.headers) $request.headers = {};
+	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
+	deleteHeader($request.headers, "Referer");
+}
+
+function isTVOSCNHKAkamaiURL(url, Settings) {
+	const host = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
+	return (url.hostname === host || /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(url.hostname)) && url.searchParams.get("os") === "akam";
+}
+
 function prepareTVOSAkamaiRequest(url, Settings) {
 	const signedParams = getSignedParamNames(url);
 	url.protocol = "http:";
@@ -80,9 +91,30 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 	if (!signedParams.has("buvid") && !url.searchParams.get("buvid")) url.searchParams.set("buvid", getTVOSBuvid(Settings));
 	if (!signedParams.has("build") && (!url.searchParams.get("build") || url.searchParams.get("build") === "0")) url.searchParams.set("build", Settings.TVOS?.Build || "89600100");
 	if (!signedParams.has("nettype") && (!url.searchParams.get("nettype") || url.searchParams.get("nettype") === "0")) url.searchParams.set("nettype", "1");
-	if (!$request.headers) $request.headers = {};
-	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
-	deleteHeader($request.headers, "Referer");
+	applyTVOSCNHKHeaders(Settings);
+	switch (Settings.TVOS?.RedirectMode) {
+		case "request-rewrite":
+			break;
+		case "response-307":
+			$response = {
+				status: 307,
+				headers: {
+					Location: url.toString(),
+					"Cache-Control": "no-store",
+				},
+			};
+			break;
+		case "response-302":
+		default:
+			$response = {
+				status: 302,
+				headers: {
+					Location: url.toString(),
+					"Cache-Control": "no-store",
+				},
+			};
+			break;
+	}
 }
 
 (async () => {
@@ -201,6 +233,7 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 					url.hostname = Settings.Host.BStar;
 					break;
 				default:
+					if (isTVOSCNHKAkamaiURL(url, Settings)) applyTVOSCNHKHeaders(Settings);
 					switch (url.port) {
 						case "": {
 							switch (true) {

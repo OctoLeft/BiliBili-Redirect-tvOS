@@ -133,6 +133,21 @@ export interface Settings {
          * @defaultValue ""
          */
         Buvid?: string;
+    /**
+         * [tvOS] Akamai 重定向方式
+         *
+         * 选择 tvOS Akamai 请求重定向至 CNHK 的方式。默认使用 302，让客户端最终 URL 明确变成 CNHK。
+         *
+         * @remarks
+         *
+         * Possible values:
+         * - `'response-302'` - 302 跳转
+         * - `'response-307'` - 307 跳转
+         * - `'request-rewrite'` - 透明改写请求
+         *
+         * @defaultValue "response-302"
+         */
+        RedirectMode?: 'response-302' | 'response-307' | 'request-rewrite';
 };
     /**
      * [储存] 配置类型

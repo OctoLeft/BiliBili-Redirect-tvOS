@@ -152,6 +152,19 @@ export default defineConfig({
 			description: "可选。留空时脚本会在本机生成并持久化随机 buvid。",
 		},
 		{
+			key: "TVOS.RedirectMode",
+			name: "[tvOS] Akamai 重定向方式",
+			defaultValue: "response-302",
+			type: "string",
+			boxJsType: "selects",
+			description: "选择 tvOS Akamai 请求重定向至 CNHK 的方式。默认使用 302，让客户端最终 URL 明确变成 CNHK。",
+			options: [
+				{ key: "response-302", label: "302 跳转" },
+				{ key: "response-307", label: "307 跳转" },
+				{ key: "request-rewrite", label: "透明改写请求" },
+			],
+		},
+		{
 			key: "Host.BStar",
 			name: "[主机名] 重定向 BStar CDN (国际版)",
 			defaultValue: "upos-sz-mirrorali.bilivideo.com",

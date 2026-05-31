@@ -12,6 +12,7 @@ export default {
 				Build: "89600100",
 				UserAgent: "Bilibili Freedoooooom/MarkII",
 				Buvid: "",
+				RedirectMode: "response-302",
 			},
 		},
 	},
