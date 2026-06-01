@@ -150,8 +150,8 @@ async function probeCNHKHost(rawURL, host, index, Settings) {
 			fetch(buildCNHKURL(rawURL, host), {
 				method: "GET",
 				headers: {
-					Accept: "*/*",
-					Range: "bytes=0-1023",
+					Accept: "application/octet-stream",
+					Range: "bytes=0-65535",
 					"User-Agent": Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII",
 					Referer: "https://www.bilibili.com",
 				},

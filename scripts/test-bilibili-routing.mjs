@@ -187,7 +187,7 @@ async function runResponseScript(apiURL, bodyText) {
 	});
 }
 
-async function runRequestScript(inputURL) {
+async function runRequestScript(inputURL, range = "bytes=0-1023") {
 	const requestURL = new URL(inputURL);
 	const result = await runSurgeBundle(requestBundle, {
 		$request: {
@@ -196,7 +196,7 @@ async function runRequestScript(inputURL) {
 			headers: {
 				Host: requestURL.host,
 				Referer: defaultReferer,
-				Range: "bytes=0-1023",
+				Range: range,
 				"User-Agent": "Bilibili Freedoooooom/MarkII",
 			},
 		},
@@ -211,11 +211,11 @@ function getHeader(headers, name) {
 	return key ? headers[key] : "";
 }
 
-async function probeURL(url, requestHeaders = {}) {
+async function probeURL(url, requestHeaders = {}, range = "bytes=0-1023") {
 	const response = await fetch(url, {
 		headers: {
 			Accept: "*/*",
-			Range: "bytes=0-1023",
+			Range: range,
 			"User-Agent": getHeader(requestHeaders, "User-Agent") || "Bilibili Freedoooooom/MarkII",
 			...(getHeader(requestHeaders, "Referer") ? { Referer: getHeader(requestHeaders, "Referer") } : {}),
 		},
@@ -251,6 +251,9 @@ async function runFreshPlayurlTest() {
 
 	const requestResult = await runRequestScript(rewrittenMediaURL);
 	const probe = await probeURL(requestResult.url, requestResult.headers);
+	const lane1Range = "bytes=524288-525311";
+	const lane1Result = await runRequestScript(rewrittenMediaURL, lane1Range);
+	const lane1Probe = await probeURL(lane1Result.url, lane1Result.headers, lane1Range);
 	const backupHosts = rewrittenMediaEntry.backups.map(hostOf);
 	const cnhkBackupCount = backupHosts.filter(isCNHKHost).length;
 
@@ -265,11 +268,17 @@ async function runFreshPlayurlTest() {
 	console.log(`fresh.request.build=${queryParamOf(requestResult.url, "build")}`);
 	console.log(`fresh.request.buvid=${queryParamOf(requestResult.url, "buvid") ? "present" : "empty"}`);
 	console.log(`fresh.request.hdntsSigned=${hasSignedHDNTS(requestResult.url) ? "true" : "false"}`);
+	console.log(`fresh.lane0.final=${hostOf(requestResult.url)}`);
+	console.log(`fresh.lane1.final=${hostOf(lane1Result.url)}`);
+	console.log(`fresh.lane1.status=${lane1Probe.status}`);
 
 	if (probe.status === 403 || probe.status >= 400) throw new Error(`fresh playurl final request returned ${probe.status}`);
+	if (lane1Probe.status === 403 || lane1Probe.status >= 400) throw new Error(`fresh lane 1 request returned ${lane1Probe.status}`);
 	if (!isCNHKHost(hostOf(rewrittenMediaURL))) throw new Error("fresh playurl response was not rewritten to CNHK");
 	if (!isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh final request was not CNHK");
+	if (!isCNHKHost(hostOf(lane1Result.url))) throw new Error("fresh lane 1 final request was not CNHK");
 	if (cnhkBackupCount < 2) throw new Error("fresh playurl did not include enough CNHK backups");
+	if (hostOf(lane1Result.url) === hostOf(requestResult.url)) throw new Error("fresh anti-stall lanes did not distribute across HK hosts");
 	if (!backupHosts.includes("upos-hz-mirrorakam.akamaized.net")) throw new Error("fresh playurl did not keep Akamai fallback");
 
 	if (originalAkamaiURL) {

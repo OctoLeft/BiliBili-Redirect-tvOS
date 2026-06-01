@@ -135,7 +135,7 @@ export default defineConfig({
 			name: "[主机名] tvOS Akamai HK 节点池",
 			defaultValue: "cn-hk-eq-01-03.bilivideo.com,cn-hk-eq-01-13.bilivideo.com,cn-hk-eq-01-12.bilivideo.com,cn-hk-eq-01-01.bilivideo.com",
 			type: "string",
-			description: "启动播放时并发测速的 HK 节点列表，使用英文逗号分隔。脚本会选择首包最快且返回 206 的节点。",
+			description: "启动播放时并发测速的 HK 节点列表，使用英文逗号分隔。脚本会选择小块下载最快且返回 206 的节点。",
 		},
 		{
 			key: "TVOS.Build",
