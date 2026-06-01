@@ -268,17 +268,17 @@ async function runFreshPlayurlTest() {
 	console.log(`fresh.request.build=${queryParamOf(requestResult.url, "build")}`);
 	console.log(`fresh.request.buvid=${queryParamOf(requestResult.url, "buvid") ? "present" : "empty"}`);
 	console.log(`fresh.request.hdntsSigned=${hasSignedHDNTS(requestResult.url) ? "true" : "false"}`);
-	console.log(`fresh.lane0.final=${hostOf(requestResult.url)}`);
-	console.log(`fresh.lane1.final=${hostOf(lane1Result.url)}`);
-	console.log(`fresh.lane1.status=${lane1Probe.status}`);
+	console.log(`fresh.sticky0.final=${hostOf(requestResult.url)}`);
+	console.log(`fresh.sticky1.final=${hostOf(lane1Result.url)}`);
+	console.log(`fresh.sticky1.status=${lane1Probe.status}`);
 
 	if (probe.status === 403 || probe.status >= 400) throw new Error(`fresh playurl final request returned ${probe.status}`);
-	if (lane1Probe.status === 403 || lane1Probe.status >= 400) throw new Error(`fresh lane 1 request returned ${lane1Probe.status}`);
+	if (lane1Probe.status === 403 || lane1Probe.status >= 400) throw new Error(`fresh sticky range request returned ${lane1Probe.status}`);
 	if (!isCNHKHost(hostOf(rewrittenMediaURL))) throw new Error("fresh playurl response was not rewritten to CNHK");
 	if (!isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh final request was not CNHK");
-	if (!isCNHKHost(hostOf(lane1Result.url))) throw new Error("fresh lane 1 final request was not CNHK");
+	if (!isCNHKHost(hostOf(lane1Result.url))) throw new Error("fresh sticky range final request was not CNHK");
 	if (cnhkBackupCount < 2) throw new Error("fresh playurl did not include enough CNHK backups");
-	if (hostOf(lane1Result.url) === hostOf(requestResult.url)) throw new Error("fresh anti-stall lanes did not distribute across HK hosts");
+	if (hostOf(lane1Result.url) !== hostOf(requestResult.url)) throw new Error("fresh request host was not sticky across ranges");
 	if (!backupHosts.includes("upos-hz-mirrorakam.akamaized.net")) throw new Error("fresh playurl did not keep Akamai fallback");
 
 	if (originalAkamaiURL) {

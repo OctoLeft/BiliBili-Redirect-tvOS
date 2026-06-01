@@ -20,8 +20,6 @@ Console.info(`FORMAT: ${FORMAT}`);
 const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
 const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
 const TVOS_CNHK_PROBE_CACHE_TTL = 10 * 60 * 1000;
-const TVOS_CNHK_ANTI_STALL_LANES = 2;
-const TVOS_CNHK_RANGE_BLOCK_SIZE = 512 * 1024;
 let preserveRawURL = false;
 let finalRawURL = "";
 
@@ -33,15 +31,6 @@ function getHeaderKey(headers, name) {
 function setHeader(headers, name, value) {
 	const key = getHeaderKey(headers, name) ?? name;
 	headers[key] = value;
-}
-
-function getHeaderValue(headers, name) {
-	const key = getHeaderKey(headers, name);
-	return key ? headers[key] : "";
-}
-
-function unique(values) {
-	return [...new Set(values.filter(Boolean))];
 }
 
 function escapeRegExp(value) {
@@ -149,29 +138,6 @@ function getFallbackCNHKHost(Settings) {
 	return isCNHKHost(configuredHost) ? configuredHost : "cn-hk-eq-01-03.bilivideo.com";
 }
 
-function getCNHKLaneHosts(hosts) {
-	return unique(hosts.filter(isCNHKHost)).slice(0, TVOS_CNHK_ANTI_STALL_LANES);
-}
-
-function getRangeBlockIndex(headers, laneCount) {
-	const range = String(getHeaderValue(headers, "Range") ?? "");
-	const match = range.match(/bytes=(\d+)-/iu);
-	if (!match || laneCount <= 1) return 0;
-	try {
-		const block = BigInt(match[1]) / BigInt(TVOS_CNHK_RANGE_BLOCK_SIZE);
-		return Number(block % BigInt(laneCount));
-	} catch {
-		const start = Number(match[1]);
-		return Number.isFinite(start) && start >= 0 ? Math.floor(start / TVOS_CNHK_RANGE_BLOCK_SIZE) % laneCount : 0;
-	}
-}
-
-function selectCNHKLaneHost(hosts) {
-	const laneHosts = getCNHKLaneHosts(hosts);
-	if (!laneHosts.length) return "";
-	return laneHosts[getRangeBlockIndex($request.headers, laneHosts.length)];
-}
-
 function readCachedCNHKHosts(rawURL) {
 	try {
 		const value = readPersistentValue(TVOS_CNHK_PROBE_CACHE_KEY);
@@ -192,14 +158,12 @@ function readCachedCNHKHosts(rawURL) {
 
 function getRequestCNHKHost(Settings) {
 	const cachedHosts = readCachedCNHKHosts(RAW_URL);
-	return selectCNHKLaneHost(cachedHosts) || cachedHosts[0] || getFallbackCNHKHost(Settings);
+	return cachedHosts[0] || getFallbackCNHKHost(Settings);
 }
 
 function getRequestCNHKHostForCurrentURL(Settings, currentHost) {
 	if (!isCNHKHost(currentHost)) return getRequestCNHKHost(Settings);
-	const cachedHosts = readCachedCNHKHosts(RAW_URL);
-	if (!cachedHosts.length || currentHost !== cachedHosts[0]) return currentHost;
-	return selectCNHKLaneHost(cachedHosts) || currentHost;
+	return currentHost;
 }
 
 function applyTVOSCNHKHeaders(Settings) {
