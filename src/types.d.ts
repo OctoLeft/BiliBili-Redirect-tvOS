@@ -26,9 +26,9 @@ export interface Settings {
          */
         OverseaVideo?: 'upos-sz-mirrorali.bilivideo.com' | 'upos-sz-mirrorcos.bilivideo.com' | 'upos-sz-mirrorhw.bilivideo.com' | 'upos-sz-mirroraliov.bilivideo.com' | 'upos-sz-mirrorcosov.bilivideo.com' | 'upos-sz-mirrorhwov.bilivideo.com' | 'cn-hk-eq-01-01.bilivideo.com' | 'cn-hk-eq-01-03.bilivideo.com' | 'cn-hk-eq-01-09.bilivideo.com' | 'cn-hk-eq-01-10.bilivideo.com' | 'cn-hk-eq-01-12.bilivideo.com' | 'cn-hk-eq-01-13.bilivideo.com' | 'cn-hk-eq-01-14.bilivideo.com';
     /**
-         * [主机名] 重定向 tvOS Akamai CDN (港澳台)
+         * [主机名] tvOS Akamai 兜底 HK CDN
          *
-         * 请选择 tvOS Akamai CDN 要重定向的 CNHK 主机名。
+         * 当 HK 节点池测速全部失败或没有缓存时使用的兜底主机名。
          *
          * @remarks
          *
@@ -44,6 +44,14 @@ export interface Settings {
          * @defaultValue "cn-hk-eq-01-03.bilivideo.com"
          */
         AkamaiCNHK?: 'cn-hk-eq-01-01.bilivideo.com' | 'cn-hk-eq-01-03.bilivideo.com' | 'cn-hk-eq-01-09.bilivideo.com' | 'cn-hk-eq-01-10.bilivideo.com' | 'cn-hk-eq-01-12.bilivideo.com' | 'cn-hk-eq-01-13.bilivideo.com' | 'cn-hk-eq-01-14.bilivideo.com';
+    /**
+         * [主机名] tvOS Akamai HK 节点池
+         *
+         * 启动播放时并发测速的 HK 节点列表，使用英文逗号分隔。脚本会选择首包最快且返回 206 的节点。
+         *
+         * @defaultValue "cn-hk-eq-01-03.bilivideo.com,cn-hk-eq-01-13.bilivideo.com,cn-hk-eq-01-12.bilivideo.com,cn-hk-eq-01-01.bilivideo.com"
+         */
+        AkamaiCNHKPool?: string;
     /**
          * [主机名] 重定向 BStar CDN (国际版)
          *
@@ -133,22 +141,6 @@ export interface Settings {
          * @defaultValue ""
          */
         Buvid?: string;
-    /**
-         * [tvOS] Akamai 重定向方式
-         *
-         * 选择 tvOS 分片请求处理方式。默认原样保留已签名查询参数，并透明改写 Akamai 分片到 CNHK。
-         *
-         * @remarks
-         *
-         * Possible values:
-         * - `'response-only'` - 签名保留 CNHK
-         * - `'response-302'` - 强制 302 跳转
-         * - `'response-307'` - 强制 307 跳转
-         * - `'request-rewrite'` - 强制透明改写请求
-         *
-         * @defaultValue "response-only"
-         */
-        RedirectMode?: 'response-only' | 'response-302' | 'response-307' | 'request-rewrite';
 };
     /**
      * [储存] 配置类型

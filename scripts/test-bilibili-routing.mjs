@@ -10,9 +10,10 @@ const defaultReferer = "https://www.bilibili.com/video/BV1Q541167Qg";
 const defaultArgument = [
 	"Storage=Argument",
 	"LogLevel=ERROR",
-	"TVOS.RedirectMode=response-only",
 	"Host.AkamaiCNHK=cn-hk-eq-01-03.bilivideo.com",
+	"Host.AkamaiCNHKPool=cn-hk-eq-01-03.bilivideo.com,cn-hk-eq-01-13.bilivideo.com,cn-hk-eq-01-12.bilivideo.com,cn-hk-eq-01-01.bilivideo.com",
 ].join("&");
+const persistentStore = new Map();
 
 function getFlag(name) {
 	const index = process.argv.indexOf(name);
@@ -39,6 +40,11 @@ function hasSignedHDNTS(value) {
 	return /[?&]hdnts=exp(?:=|%3D)\d+~hmac(?:=|%3D)/u.test(value);
 }
 
+function playbackDeadlineOf(value) {
+	const deadline = Number(queryParamOf(value, "deadline"));
+	return Number.isFinite(deadline) && deadline > 0 ? deadline * 1000 : 0;
+}
+
 function isAkamaiHost(host) {
 	return host === "upos-hz-mirrorakam.akamaized.net";
 }
@@ -52,6 +58,10 @@ function isMediaURL(value) {
 }
 
 function collectMediaURLs(node, urls = []) {
+	if (isMediaURL(node)) {
+		urls.push(node);
+		return urls;
+	}
 	if (Array.isArray(node)) {
 		for (const item of node) collectMediaURLs(item, urls);
 		return urls;
@@ -65,20 +75,85 @@ function collectMediaURLs(node, urls = []) {
 	return urls;
 }
 
+function collectMediaEntries(node, entries = []) {
+	if (Array.isArray(node)) {
+		for (const item of node) collectMediaEntries(item, entries);
+		return entries;
+	}
+	if (!node || typeof node !== "object") return entries;
+
+	const url = ["baseUrl", "base_url", "url"].map(key => node[key]).find(isMediaURL);
+	if (url) {
+		entries.push({
+			url,
+			backups: [
+				...(Array.isArray(node.backupUrl) ? node.backupUrl : []),
+				...(Array.isArray(node.backup_url) ? node.backup_url : []),
+				...(Array.isArray(node.backupUrls) ? node.backupUrls : []),
+				...(Array.isArray(node.backup_urls) ? node.backup_urls : []),
+			].filter(isMediaURL),
+		});
+	}
+	for (const value of Object.values(node)) collectMediaEntries(value, entries);
+	return entries;
+}
+
+function createHTTPClient() {
+	async function request(resource, callback) {
+		const controller = new AbortController();
+		const timeout = Number(resource.timeout || 5) * 1000;
+		const timer = setTimeout(() => controller.abort(), timeout);
+		try {
+			const response = await fetch(resource.url, {
+				method: resource.method ?? "GET",
+				headers: resource.headers ?? {},
+				body: resource.body,
+				redirect: resource["auto-redirect"] === false ? "manual" : "follow",
+				signal: controller.signal,
+			});
+			const headers = Object.fromEntries(response.headers.entries());
+			const body = await response.text();
+			callback(null, { status: response.status, headers }, body);
+		} catch (error) {
+			callback(error);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	return {
+		get(resource, callback) {
+			request({ ...resource, method: "GET" }, callback);
+		},
+		post(resource, callback) {
+			request({ ...resource, method: "POST" }, callback);
+		},
+		put(resource, callback) {
+			request({ ...resource, method: "PUT" }, callback);
+		},
+		delete(resource, callback) {
+			request({ ...resource, method: "DELETE" }, callback);
+		},
+	};
+}
+
 function runSurgeBundle(code, globals) {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error("Surge bundle did not call $done in time")), 5000);
+		const timer = setTimeout(() => reject(new Error("Surge bundle did not call $done in time")), 10000);
 		const context = {
 			console: { log() {} },
+			setTimeout,
+			clearTimeout,
 			TextDecoder,
 			TextEncoder,
+			$httpClient: createHTTPClient(),
 			$argument: defaultArgument,
 			$environment: { "surge-version": "9.0" },
 			$persistentStore: {
-				read() {
-					return "";
+				read(key) {
+					return persistentStore.get(key) ?? "";
 				},
-				write() {
+				write(value, key) {
+					persistentStore.set(key, value);
 					return true;
 				},
 			},
@@ -165,17 +240,24 @@ async function runFreshPlayurlTest() {
 	const originalBody = JSON.parse(bodyText);
 	if (originalBody.code !== 0) throw new Error(`playurl API failed: ${bodyText.slice(0, 300)}`);
 
-	const originalMediaURL = collectMediaURLs(originalBody)[0];
+	const originalMediaURLs = collectMediaURLs(originalBody);
+	const originalMediaURL = originalMediaURLs[0];
+	const originalAkamaiURL = originalMediaURLs.find(value => isAkamaiHost(hostOf(value)));
 	const rewrittenResponse = await runResponseScript(apiURL, bodyText);
 	const rewrittenBody = JSON.parse(rewrittenResponse.body);
-	const rewrittenMediaURL = collectMediaURLs(rewrittenBody)[0];
+	const rewrittenMediaEntry = collectMediaEntries(rewrittenBody)[0];
+	const rewrittenMediaURL = rewrittenMediaEntry?.url;
 	if (!rewrittenMediaURL) throw new Error("response script did not leave any media URL to test");
 
 	const requestResult = await runRequestScript(rewrittenMediaURL);
 	const probe = await probeURL(requestResult.url, requestResult.headers);
+	const backupHosts = rewrittenMediaEntry.backups.map(hostOf);
+	const cnhkBackupCount = backupHosts.filter(isCNHKHost).length;
 
 	console.log(`fresh.playurl.before=${hostOf(originalMediaURL)}`);
 	console.log(`fresh.playurl.after=${hostOf(rewrittenMediaURL)}`);
+	console.log(`fresh.playurl.backupCNHK=${cnhkBackupCount}`);
+	console.log(`fresh.playurl.backupAkamai=${backupHosts.includes("upos-hz-mirrorakam.akamaized.net") ? "true" : "false"}`);
 	console.log(`fresh.request.final=${hostOf(requestResult.url)}`);
 	console.log(`fresh.request.status=${probe.status}`);
 	console.log(`fresh.request.contentRange=${probe.contentRange}`);
@@ -185,12 +267,31 @@ async function runFreshPlayurlTest() {
 	console.log(`fresh.request.hdntsSigned=${hasSignedHDNTS(requestResult.url) ? "true" : "false"}`);
 
 	if (probe.status === 403 || probe.status >= 400) throw new Error(`fresh playurl final request returned ${probe.status}`);
-	if (isAkamaiHost(hostOf(rewrittenMediaURL)) && !isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh Akamai request was not rewritten to CNHK");
+	if (!isCNHKHost(hostOf(rewrittenMediaURL))) throw new Error("fresh playurl response was not rewritten to CNHK");
+	if (!isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh final request was not CNHK");
+	if (cnhkBackupCount < 2) throw new Error("fresh playurl did not include enough CNHK backups");
+	if (!backupHosts.includes("upos-hz-mirrorakam.akamaized.net")) throw new Error("fresh playurl did not keep Akamai fallback");
+
+	if (originalAkamaiURL) {
+		const fallbackResult = await runRequestScript(originalAkamaiURL);
+		const fallbackProbe = await probeURL(fallbackResult.url, fallbackResult.headers);
+		console.log(`fresh.akamaiFallback.final=${hostOf(fallbackResult.url)}`);
+		console.log(`fresh.akamaiFallback.status=${fallbackProbe.status}`);
+		if (!isCNHKHost(hostOf(fallbackResult.url))) throw new Error("fresh Akamai fallback was not rewritten to CNHK");
+		if (fallbackProbe.status === 403 || fallbackProbe.status >= 400) throw new Error(`fresh Akamai fallback returned ${fallbackProbe.status}`);
+	}
 }
 
 async function runProvidedURLTest() {
 	const providedURL = getFlag("--url") || process.env.BILI_TEST_URL;
 	if (!providedURL) return;
+	const deadline = playbackDeadlineOf(providedURL);
+	if ((process.env.BILI_STRICT_URL === "1" || process.argv.includes("--strict-url")) && deadline && deadline < Date.now()) {
+		console.log(`provided.request.input=${hostOf(providedURL)}`);
+		console.log(`provided.request.skipped=expired`);
+		console.log(`provided.request.deadline=${new Date(deadline).toISOString()}`);
+		return;
+	}
 	const requestResult = await runRequestScript(providedURL);
 	const probe = await probeURL(requestResult.url, requestResult.headers);
 

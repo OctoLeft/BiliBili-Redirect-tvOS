@@ -1,5 +1,5 @@
 import gRPC from "@nsnanocat/grpc";
-import { Console, done } from "@nsnanocat/util";
+import { Console, done, fetch } from "@nsnanocat/util";
 import { URL } from "@nsnanocat/url";
 import { MessageType } from "@protobuf-ts/runtime/build/es2015/index.js";
 import database from "./function/database.mjs";
@@ -8,6 +8,10 @@ import setENV from "./function/setENV.mjs";
 const url = new URL($request.url);
 const FORMAT = ($response.headers?.["Content-Type"] ?? $response.headers?.["content-type"])?.split(";")?.[0];
 const PATHs = url.pathname.split("/").filter(Boolean);
+const DEFAULT_CNHK_POOL = ["cn-hk-eq-01-03.bilivideo.com", "cn-hk-eq-01-13.bilivideo.com", "cn-hk-eq-01-12.bilivideo.com", "cn-hk-eq-01-01.bilivideo.com"];
+const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
+const TVOS_CNHK_PROBE_TIMEOUT = 1800;
+let cnhkProbePromise = null;
 
 function isObject(value) {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -24,6 +28,75 @@ function getURLHost(value) {
 		return new URL(value).hostname;
 	} catch {
 		return "";
+	}
+}
+
+function rewriteRawURLAuthority(rawURL, protocol, host) {
+	return rawURL.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]+/iu, `${protocol}//${host}`);
+}
+
+function rawURLPathname(rawURL) {
+	const match = rawURL.match(/^[a-z][a-z\d+.-]*:\/\/[^/?#]+([^?#]*)/iu);
+	return match?.[1] ?? "";
+}
+
+function isCNHKHost(host) {
+	return /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(host);
+}
+
+function unique(values) {
+	return [...new Set(values.filter(Boolean))];
+}
+
+function parseHostList(value) {
+	return String(value ?? "")
+		.split(",")
+		.map(host => host.trim())
+		.filter(isCNHKHost);
+}
+
+function getFallbackCNHKHost(Settings) {
+	const configuredHost = Settings.Host?.AkamaiCNHK;
+	return isCNHKHost(configuredHost) ? configuredHost : DEFAULT_CNHK_POOL[0];
+}
+
+function getCNHKPool(Settings) {
+	const configuredPool = parseHostList(Settings.Host?.AkamaiCNHKPool);
+	return unique(configuredPool.length ? configuredPool : DEFAULT_CNHK_POOL);
+}
+
+function readPersistentValue(key) {
+	try {
+		if (typeof $persistentStore === "undefined") return "";
+		return $persistentStore.read(key) ?? "";
+	} catch (e) {
+		Console.warn(`读取持久化缓存失败: ${e}`);
+		return "";
+	}
+}
+
+function writePersistentValue(key, value) {
+	try {
+		if (typeof $persistentStore === "undefined") return;
+		$persistentStore.write(value, key);
+	} catch (e) {
+		Console.warn(`写入持久化缓存失败: ${e}`);
+	}
+}
+
+function writeCNHKProbeCache(rawURL, hosts) {
+	try {
+		const pathname = rawURLPathname(rawURL);
+		const currentValue = readPersistentValue(TVOS_CNHK_PROBE_CACHE_KEY);
+		const currentCache = currentValue ? JSON.parse(currentValue) : {};
+		const entries = Array.isArray(currentCache.entries) ? currentCache.entries : [];
+		const nextEntries = [
+			{ pathname, hosts },
+			...entries.filter(entry => entry?.pathname !== pathname),
+		].slice(0, 20);
+		writePersistentValue(TVOS_CNHK_PROBE_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), pathname, hosts, entries: nextEntries }));
+	} catch (e) {
+		Console.warn(`写入 CNHK 节点缓存失败: ${e}`);
 	}
 }
 
@@ -57,20 +130,92 @@ function isSignedAkamaiURL(value) {
 }
 
 function shouldUseSignedAkamaiFallback(Settings) {
-	return (Settings.TVOS?.RedirectMode || "response-only") === "response-only";
+	return true;
 }
 
-function getPreferredPlaybackURL(currentURL, backupCandidates, Settings) {
+function buildCNHKURL(rawURL, host) {
+	return rewriteRawURLAuthority(rawURL, "http:", host);
+}
+
+function timeoutAfter(ms) {
+	return new Promise(resolve => {
+		setTimeout(() => resolve({ timeout: true }), ms);
+	});
+}
+
+async function probeCNHKHost(rawURL, host, index, Settings) {
+	const startedAt = Date.now();
+	try {
+		const response = await Promise.race([
+			fetch(buildCNHKURL(rawURL, host), {
+				method: "GET",
+				headers: {
+					Accept: "*/*",
+					Range: "bytes=0-1023",
+					"User-Agent": Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII",
+					Referer: "https://www.bilibili.com",
+				},
+				redirection: false,
+				timeout: 2,
+			}),
+			timeoutAfter(TVOS_CNHK_PROBE_TIMEOUT),
+		]);
+		const status = response?.status ?? response?.statusCode;
+		if (status !== 206) return null;
+		return { host, index, duration: Date.now() - startedAt };
+	} catch (e) {
+		Console.debug(`CNHK probe failed: ${host} ${e}`);
+		return null;
+	}
+}
+
+async function getRankedCNHKHosts(rawURL, Settings) {
+	if (!cnhkProbePromise) {
+		cnhkProbePromise = (async () => {
+			const pool = getCNHKPool(Settings);
+			const probes = await Promise.all(pool.map((host, index) => probeCNHKHost(rawURL, host, index, Settings)));
+			const ranked = probes
+				.filter(Boolean)
+				.sort((a, b) => (Math.abs(a.duration - b.duration) <= 50 ? a.index - b.index : a.duration - b.duration))
+				.map(result => result.host);
+			if (ranked.length) {
+				Console.info(`Fastest CNHK hosts: ${ranked.join(", ")}`);
+				return ranked;
+			}
+			const fallbackHost = getFallbackCNHKHost(Settings);
+			return unique([fallbackHost, ...pool]);
+		})();
+	}
+	return cnhkProbePromise;
+}
+
+function buildCNHKPlaybackPlan(rawURL, rankedHosts) {
+	const hkURLs = unique(rankedHosts.map(host => buildCNHKURL(rawURL, host)));
+	if (!hkURLs.length) return null;
+	writeCNHKProbeCache(rawURL, rankedHosts);
+	return {
+		primary: hkURLs[0],
+		backups: unique([...hkURLs.slice(1), rawURL]),
+	};
+}
+
+function getFallbackPlaybackPlan(currentURL, backupCandidates, Settings) {
 	const urls = [currentURL, ...backupCandidates].filter(value => typeof value === "string" && /^https?:\/\//u.test(value));
 	const preferredCNHKURL = getPreferredCNHKURL(urls, Settings);
-	if (preferredCNHKURL) return preferredCNHKURL;
-	if (!shouldUseSignedAkamaiFallback(Settings)) return "";
-	const preferredAkamaiURL = urls.find(isSignedAkamaiURL);
-	if (preferredAkamaiURL) return preferredAkamaiURL;
+	if (preferredCNHKURL) return { primary: preferredCNHKURL, backups: reorderPreferredURL(backupCandidates, preferredCNHKURL) };
 	const preferredOverseaURL = urls.find(isSignedOverseaVideoURL);
-	if (preferredOverseaURL) return preferredOverseaURL;
+	if (preferredOverseaURL) return { primary: preferredOverseaURL, backups: reorderPreferredURL(backupCandidates, preferredOverseaURL) };
 	if (!isOverseaVideoHost(getURLHost(currentURL))) return "";
 	return "";
+}
+
+async function getPreferredPlaybackPlan(currentURL, backupCandidates, Settings) {
+	const urls = [currentURL, ...backupCandidates].filter(value => typeof value === "string" && /^https?:\/\//u.test(value));
+	if (shouldUseSignedAkamaiFallback(Settings)) {
+		const signedAkamaiURL = urls.find(isSignedAkamaiURL);
+		if (signedAkamaiURL) return buildCNHKPlaybackPlan(signedAkamaiURL, await getRankedCNHKHosts(signedAkamaiURL, Settings));
+	}
+	return getFallbackPlaybackPlan(currentURL, backupCandidates, Settings);
 }
 
 function reorderPreferredURL(values, preferredURL) {
@@ -79,10 +224,14 @@ function reorderPreferredURL(values, preferredURL) {
 	return [preferredURL, ...urls.filter(value => value !== preferredURL)];
 }
 
-function rewriteJSONNode(node, Settings) {
+function arraysEqual(left = [], right = []) {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+async function rewriteJSONNode(node, Settings) {
 	let rewriteCount = 0;
 	if (Array.isArray(node)) {
-		for (const item of node) rewriteCount += rewriteJSONNode(item, Settings);
+		for (const item of node) rewriteCount += await rewriteJSONNode(item, Settings);
 		return rewriteCount;
 	}
 	if (!isObject(node)) return rewriteCount;
@@ -94,20 +243,23 @@ function rewriteJSONNode(node, Settings) {
 		...toArray(node.backupUrls),
 	];
 	const currentURL = ["base_url", "baseUrl", "url"].map(key => node[key]).find(value => typeof value === "string");
-	const preferredURL = getPreferredPlaybackURL(currentURL, backupCandidates, Settings);
-	if (preferredURL) {
+	const playbackPlan = await getPreferredPlaybackPlan(currentURL, backupCandidates, Settings);
+	if (playbackPlan?.primary) {
 		for (const key of ["base_url", "baseUrl", "url"]) {
-			if (typeof node[key] === "string" && node[key] !== preferredURL) {
-				node[key] = preferredURL;
+			if (typeof node[key] === "string" && node[key] !== playbackPlan.primary) {
+				node[key] = playbackPlan.primary;
 				rewriteCount += 1;
 			}
 		}
 		for (const key of ["backup_url", "backupUrl", "backup_urls", "backupUrls"]) {
-			if (Array.isArray(node[key])) node[key] = reorderPreferredURL(node[key], preferredURL);
+			if (Array.isArray(node[key]) && !arraysEqual(node[key], playbackPlan.backups)) {
+				node[key] = playbackPlan.backups;
+				rewriteCount += 1;
+			}
 		}
 	}
 
-	for (const value of Object.values(node)) rewriteCount += rewriteJSONNode(value, Settings);
+	for (const value of Object.values(node)) rewriteCount += await rewriteJSONNode(value, Settings);
 	return rewriteCount;
 }
 
@@ -227,16 +379,16 @@ class PlayViewUniteReply$Type extends MessageType {
 }
 const PlayViewUniteReply = new PlayViewUniteReply$Type();
 
-function rewriteStreamList(streamList = [], Settings) {
+async function rewriteStreamList(streamList = [], Settings) {
 	let rewriteCount = 0;
 	for (const stream of streamList) {
 		switch (stream?.content?.oneofKind) {
 			case "dashVideo": {
 				const video = stream.content.dashVideo;
-				const preferredURL = getPreferredPlaybackURL(video.baseUrl, video.backupUrl ?? [], Settings);
-				if (preferredURL && video.baseUrl !== preferredURL) {
-					video.baseUrl = preferredURL;
-					video.backupUrl = reorderPreferredURL(video.backupUrl, preferredURL);
+				const playbackPlan = await getPreferredPlaybackPlan(video.baseUrl, video.backupUrl ?? [], Settings);
+				if (playbackPlan?.primary && (video.baseUrl !== playbackPlan.primary || !arraysEqual(video.backupUrl ?? [], playbackPlan.backups))) {
+					video.baseUrl = playbackPlan.primary;
+					video.backupUrl = playbackPlan.backups;
 					rewriteCount += 1;
 				}
 				break;
@@ -244,10 +396,10 @@ function rewriteStreamList(streamList = [], Settings) {
 			case "segmentVideo":
 			case "SegmentVideo":
 				for (const segment of stream.content.segmentVideo?.segment ?? []) {
-					const preferredURL = getPreferredPlaybackURL(segment.url, segment.backupUrl ?? [], Settings);
-					if (preferredURL && segment.url !== preferredURL) {
-						segment.url = preferredURL;
-						segment.backupUrl = reorderPreferredURL(segment.backupUrl, preferredURL);
+					const playbackPlan = await getPreferredPlaybackPlan(segment.url, segment.backupUrl ?? [], Settings);
+					if (playbackPlan?.primary && (segment.url !== playbackPlan.primary || !arraysEqual(segment.backupUrl ?? [], playbackPlan.backups))) {
+						segment.url = playbackPlan.primary;
+						segment.backupUrl = playbackPlan.backups;
 						rewriteCount += 1;
 					}
 				}
@@ -257,15 +409,15 @@ function rewriteStreamList(streamList = [], Settings) {
 	return rewriteCount;
 }
 
-function rewriteVodInfo(vodInfo, Settings) {
+async function rewriteVodInfo(vodInfo, Settings) {
 	if (!vodInfo) return 0;
 	return rewriteStreamList(vodInfo.streamList ?? [], Settings);
 }
 
-function rewritePlayViewUnite(binaryBody, Settings) {
+async function rewritePlayViewUnite(binaryBody, Settings) {
 	const data = PlayViewUniteReply.fromBinary(binaryBody);
-	let rewriteCount = rewriteVodInfo(data.vodInfo, Settings);
-	for (const video of data.fragmentVideo?.videos ?? []) rewriteCount += rewriteVodInfo(video.vodInfo, Settings);
+	let rewriteCount = await rewriteVodInfo(data.vodInfo, Settings);
+	for (const video of data.fragmentVideo?.videos ?? []) rewriteCount += await rewriteVodInfo(video.vodInfo, Settings);
 	if (rewriteCount > 0) {
 		Console.info(`Signed playurl rewrites: ${rewriteCount}`);
 		return PlayViewUniteReply.toBinary(data);
@@ -291,7 +443,7 @@ function normalizeChangedBodyHeaders() {
 		case "application/json":
 		case "text/json": {
 			const body = JSON.parse($response.body ?? "{}");
-			const rewriteCount = rewriteJSONNode(body, Settings);
+			const rewriteCount = await rewriteJSONNode(body, Settings);
 			if (rewriteCount > 0) {
 				Console.info(`Signed JSON playurl rewrites: ${rewriteCount}`);
 				$response.body = JSON.stringify(body);
@@ -307,7 +459,7 @@ function normalizeChangedBodyHeaders() {
 				case "app.bilibili.com/bilibili.app.playerunite.v1.Player/PlayViewUnite": {
 					const rawBody = $response.body ?? new Uint8Array();
 					const binaryBody = gRPC.decode(rawBody);
-					const rewrittenBody = rewritePlayViewUnite(binaryBody, Settings);
+					const rewrittenBody = await rewritePlayViewUnite(binaryBody, Settings);
 					if (rewrittenBody !== binaryBody) {
 						$response.body = gRPC.encode(rewrittenBody);
 						normalizeChangedBodyHeaders();

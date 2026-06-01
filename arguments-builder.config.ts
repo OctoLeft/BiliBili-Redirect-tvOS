@@ -123,12 +123,19 @@ export default defineConfig({
 		},
 		{
 			key: "Host.AkamaiCNHK",
-			name: "[主机名] 重定向 tvOS Akamai CDN (港澳台)",
+			name: "[主机名] tvOS Akamai 兜底 HK CDN",
 			defaultValue: "cn-hk-eq-01-03.bilivideo.com",
 			type: "string",
 			boxJsType: "selects",
-			description: "请选择 tvOS Akamai CDN 要重定向的 CNHK 主机名。",
+			description: "当 HK 节点池测速全部失败或没有缓存时使用的兜底主机名。",
 			options: cnhkHostOptions,
+		},
+		{
+			key: "Host.AkamaiCNHKPool",
+			name: "[主机名] tvOS Akamai HK 节点池",
+			defaultValue: "cn-hk-eq-01-03.bilivideo.com,cn-hk-eq-01-13.bilivideo.com,cn-hk-eq-01-12.bilivideo.com,cn-hk-eq-01-01.bilivideo.com",
+			type: "string",
+			description: "启动播放时并发测速的 HK 节点列表，使用英文逗号分隔。脚本会选择首包最快且返回 206 的节点。",
 		},
 		{
 			key: "TVOS.Build",
@@ -150,20 +157,6 @@ export default defineConfig({
 			defaultValue: "",
 			type: "string",
 			description: "可选。留空时脚本会在本机生成并持久化随机 buvid。",
-		},
-		{
-			key: "TVOS.RedirectMode",
-			name: "[tvOS] Akamai 重定向方式",
-			defaultValue: "response-only",
-			type: "string",
-			boxJsType: "selects",
-			description: "选择 tvOS 分片请求处理方式。默认原样保留已签名查询参数，并透明改写 Akamai 分片到 CNHK。",
-			options: [
-				{ key: "response-only", label: "签名保留 CNHK" },
-				{ key: "response-302", label: "强制 302 跳转" },
-				{ key: "response-307", label: "强制 307 跳转" },
-				{ key: "request-rewrite", label: "强制透明改写请求" },
-			],
 		},
 		{
 			key: "Host.BStar",

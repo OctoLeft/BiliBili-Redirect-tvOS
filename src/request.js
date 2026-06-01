@@ -18,6 +18,8 @@ const FORMAT = ($request.headers?.["Content-Type"] ?? $request.headers?.["conten
 Console.info(`FORMAT: ${FORMAT}`);
 
 const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
+const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
+const TVOS_CNHK_PROBE_CACHE_TTL = 10 * 60 * 1000;
 let preserveRawURL = false;
 let finalRawURL = "";
 
@@ -37,6 +39,11 @@ function escapeRegExp(value) {
 
 function rawURLHost(rawURL) {
 	const match = rawURL.match(/^[a-z][a-z\d+.-]*:\/\/([^/?#]+)/iu);
+	return match?.[1] ?? "";
+}
+
+function rawURLPathname(rawURL) {
+	const match = rawURL.match(/^[a-z][a-z\d+.-]*:\/\/[^/?#]+([^?#]*)/iu);
 	return match?.[1] ?? "";
 }
 
@@ -122,6 +129,37 @@ function getRawSignedParamNames(rawURL) {
 	}
 }
 
+function isCNHKHost(host) {
+	return /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(host);
+}
+
+function getFallbackCNHKHost(Settings) {
+	const configuredHost = Settings.Host?.AkamaiCNHK;
+	return isCNHKHost(configuredHost) ? configuredHost : "cn-hk-eq-01-03.bilivideo.com";
+}
+
+function readCachedCNHKHosts(rawURL) {
+	try {
+		const value = readPersistentValue(TVOS_CNHK_PROBE_CACHE_KEY);
+		if (!value) return [];
+		const cache = JSON.parse(value);
+		if (Date.now() - Number(cache.updatedAt ?? 0) > TVOS_CNHK_PROBE_CACHE_TTL) return [];
+		const pathname = rawURLPathname(rawURL);
+		const entries = Array.isArray(cache.entries) ? cache.entries : [];
+		const entry = entries.find(item => item?.pathname === pathname);
+		if (entry) return Array.isArray(entry.hosts) ? entry.hosts.filter(isCNHKHost) : [];
+		if (cache.pathname === pathname) return Array.isArray(cache.hosts) ? cache.hosts.filter(isCNHKHost) : [];
+		return [];
+	} catch (e) {
+		Console.warn(`读取 CNHK 节点缓存失败: ${e}`);
+		return [];
+	}
+}
+
+function getRequestCNHKHost(Settings) {
+	return readCachedCNHKHosts(RAW_URL)[0] || getFallbackCNHKHost(Settings);
+}
+
 function applyTVOSCNHKHeaders(Settings) {
 	if (!$request.headers) $request.headers = {};
 	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
@@ -134,8 +172,8 @@ function applyTVOSAkamaiHeaders(Settings) {
 	if (!getHeaderKey($request.headers, "Referer")) setHeader($request.headers, "Referer", "https://www.bilibili.com");
 }
 
-function isResponseOnlyMode(Settings) {
-	return (Settings.TVOS?.RedirectMode || "response-only") === "response-only";
+function isResponseOnlyMode() {
+	return true;
 }
 
 function isSignedPlaybackURL(url) {
@@ -148,45 +186,16 @@ function preserveSignedPlaybackRequest(Settings) {
 }
 
 function isTVOSCNHKAkamaiURL(url, Settings) {
-	const host = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
-	return (url.hostname === host || /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(url.hostname)) && url.searchParams.get("os") === "akam";
+	return isCNHKHost(url.hostname) && url.searchParams.get("os") === "akam";
 }
 
 function prepareTVOSAkamaiRequest(Settings) {
-	const redirectMode = Settings.TVOS?.RedirectMode || "response-only";
-	const akamaiURL = buildTVOSAkamaiCNHKURL(RAW_URL, Settings);
+	const akamaiURL = buildTVOSCNHKURL(RAW_URL, Settings, getRequestCNHKHost(Settings));
 	setFinalRawURL(akamaiURL);
 	applyTVOSCNHKHeaders(Settings);
-
-	switch (redirectMode) {
-		case "response-only":
-		case "request-rewrite":
-			break;
-		case "response-307":
-			$response = {
-				status: 307,
-				headers: {
-					Location: akamaiURL,
-					"Cache-Control": "no-store",
-				},
-			};
-			break;
-		case "response-302":
-			$response = {
-				status: 302,
-				headers: {
-					Location: akamaiURL,
-					"Cache-Control": "no-store",
-				},
-			};
-			break;
-		default:
-			break;
-	}
 }
 
-function buildTVOSAkamaiCNHKURL(rawURL, Settings) {
-	const host = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
+function buildTVOSCNHKURL(rawURL, Settings, host) {
 	const signedParams = getRawSignedParamNames(rawURL);
 	let nextURL = rewriteRawURLAuthority(rawURL, "http:", host);
 	if (!signedParams.has("buvid") && !getRawQueryParam(nextURL, "buvid")) nextURL = setRawQueryParam(nextURL, "buvid", getTVOSBuvid(Settings));
@@ -302,7 +311,7 @@ function buildTVOSAkamaiCNHKURL(rawURL, Settings) {
 				case "upos-sz-mirroraliov.bilivideo.com": // 阿里云 CDN，海外
 				case "upos-sz-mirrorcosov.bilivideo.com": // 腾讯云 CDN，海外
 				case "upos-sz-mirrorhwov.bilivideo.com": // 华为云 CDN，海外
-					if (isResponseOnlyMode(Settings) && isSignedPlaybackURL(url)) preserveSignedPlaybackRequest(Settings);
+					if (isResponseOnlyMode() && isSignedPlaybackURL(url)) preserveSignedPlaybackRequest(Settings);
 					else url.hostname = Settings.Host.OverseaVideo;
 					break;
 				case "upos-sz-mirroralibstar1.bilivideo.com": // 阿里云 CDN，海外（东南亚），其他类型的 CDN 应该不能替换为此 Host，但反过来可以。
@@ -312,7 +321,10 @@ function buildTVOSAkamaiCNHKURL(rawURL, Settings) {
 					url.hostname = Settings.Host.BStar;
 					break;
 				default:
-					if (isTVOSCNHKAkamaiURL(url, Settings)) applyTVOSCNHKHeaders(Settings);
+					if (isTVOSCNHKAkamaiURL(url, Settings)) {
+						setFinalRawURL(buildTVOSCNHKURL(RAW_URL, Settings, url.hostname));
+						applyTVOSCNHKHeaders(Settings);
+					}
 					switch (url.port) {
 						case "": {
 							switch (true) {

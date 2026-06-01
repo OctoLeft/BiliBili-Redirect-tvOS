@@ -4,6 +4,7 @@ export default {
 			Host: {
 				OverseaVideo: "upos-sz-mirrorali.bilivideo.com",
 				AkamaiCNHK: "cn-hk-eq-01-03.bilivideo.com",
+				AkamaiCNHKPool: "cn-hk-eq-01-03.bilivideo.com,cn-hk-eq-01-13.bilivideo.com,cn-hk-eq-01-12.bilivideo.com,cn-hk-eq-01-01.bilivideo.com",
 				BStar: "upos-sz-mirrorali.bilivideo.com",
 				PCDN: "upos-sz-mirrorali.bilivideo.com",
 				MCDN: "proxy-tf-all-ws.bilivideo.com",
@@ -12,7 +13,6 @@ export default {
 				Build: "89600100",
 				UserAgent: "Bilibili Freedoooooom/MarkII",
 				Buvid: "",
-				RedirectMode: "response-only",
 			},
 		},
 	},
