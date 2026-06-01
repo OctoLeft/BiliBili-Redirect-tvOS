@@ -136,12 +136,12 @@ export interface Settings {
     /**
          * [tvOS] Akamai 重定向方式
          *
-         * 选择 tvOS 分片请求处理方式。默认保留服务端已签名播放地址，仅补齐必要请求头，避免 host-only 改写破坏签名。
+         * 选择 tvOS 分片请求处理方式。默认原样保留已签名查询参数，并透明改写 Akamai 分片到 CNHK。
          *
          * @remarks
          *
          * Possible values:
-         * - `'response-only'` - 保留已签名地址
+         * - `'response-only'` - 签名保留 CNHK
          * - `'response-302'` - 强制 302 跳转
          * - `'response-307'` - 强制 307 跳转
          * - `'request-rewrite'` - 强制透明改写请求

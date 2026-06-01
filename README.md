@@ -8,4 +8,4 @@ Surge 模块导入地址：
 https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/latest/download/BiliBili.Redirect.tvOS.sgmodule
 ```
 
-本 fork 默认保留服务端签发的可用播放 URL，并补齐 tvOS 分片请求需要的 `Referer`；不会把已签名 m4s URL 强行改写到其他 host，避免破坏 `hdnts`/`upsig` 导致 403。
+本 fork 默认把 tvOS Akamai 分片透明改写到 `cn-hk-eq-01-03.bilivideo.com`，但会原样保留服务端签发的 raw query，避免破坏 `hdnts`/`upsig` 导致 403。

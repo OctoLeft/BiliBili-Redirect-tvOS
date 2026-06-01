@@ -27,6 +27,26 @@ function hostOf(value) {
 	}
 }
 
+function queryParamOf(value, name) {
+	try {
+		return new URL(value).searchParams.get(name) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function hasSignedHDNTS(value) {
+	return /[?&]hdnts=exp(?:=|%3D)\d+~hmac(?:=|%3D)/u.test(value);
+}
+
+function isAkamaiHost(host) {
+	return host === "upos-hz-mirrorakam.akamaized.net";
+}
+
+function isCNHKHost(host) {
+	return /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(host);
+}
+
 function isMediaURL(value) {
 	return typeof value === "string" && /^https?:\/\//u.test(value) && value.includes("/upgcxcode/");
 }
@@ -160,8 +180,12 @@ async function runFreshPlayurlTest() {
 	console.log(`fresh.request.status=${probe.status}`);
 	console.log(`fresh.request.contentRange=${probe.contentRange}`);
 	console.log(`fresh.request.server=${probe.server}`);
+	console.log(`fresh.request.build=${queryParamOf(requestResult.url, "build")}`);
+	console.log(`fresh.request.buvid=${queryParamOf(requestResult.url, "buvid") ? "present" : "empty"}`);
+	console.log(`fresh.request.hdntsSigned=${hasSignedHDNTS(requestResult.url) ? "true" : "false"}`);
 
 	if (probe.status === 403 || probe.status >= 400) throw new Error(`fresh playurl final request returned ${probe.status}`);
+	if (isAkamaiHost(hostOf(rewrittenMediaURL)) && !isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh Akamai request was not rewritten to CNHK");
 }
 
 async function runProvidedURLTest() {
@@ -174,9 +198,15 @@ async function runProvidedURLTest() {
 	console.log(`provided.request.final=${hostOf(requestResult.url)}`);
 	console.log(`provided.request.status=${probe.status}`);
 	console.log(`provided.request.server=${probe.server}`);
+	console.log(`provided.request.build=${queryParamOf(requestResult.url, "build")}`);
+	console.log(`provided.request.buvid=${queryParamOf(requestResult.url, "buvid") ? "present" : "empty"}`);
+	console.log(`provided.request.hdntsSigned=${hasSignedHDNTS(requestResult.url) ? "true" : "false"}`);
 
 	if ((process.env.BILI_STRICT_URL === "1" || process.argv.includes("--strict-url")) && (probe.status === 403 || probe.status >= 400)) {
 		throw new Error(`provided URL final request returned ${probe.status}`);
+	}
+	if ((process.env.BILI_STRICT_URL === "1" || process.argv.includes("--strict-url")) && isAkamaiHost(hostOf(providedURL)) && !isCNHKHost(hostOf(requestResult.url))) {
+		throw new Error("provided Akamai request was not rewritten to CNHK");
 	}
 }
 

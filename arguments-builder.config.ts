@@ -157,9 +157,9 @@ export default defineConfig({
 			defaultValue: "response-only",
 			type: "string",
 			boxJsType: "selects",
-			description: "选择 tvOS 分片请求处理方式。默认保留服务端已签名播放地址，仅补齐必要请求头，避免 host-only 改写破坏签名。",
+			description: "选择 tvOS 分片请求处理方式。默认原样保留已签名查询参数，并透明改写 Akamai 分片到 CNHK。",
 			options: [
-				{ key: "response-only", label: "保留已签名地址" },
+				{ key: "response-only", label: "签名保留 CNHK" },
 				{ key: "response-302", label: "强制 302 跳转" },
 				{ key: "response-307", label: "强制 307 跳转" },
 				{ key: "request-rewrite", label: "强制透明改写请求" },

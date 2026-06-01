@@ -65,10 +65,12 @@ function getPreferredPlaybackURL(currentURL, backupCandidates, Settings) {
 	const preferredCNHKURL = getPreferredCNHKURL(urls, Settings);
 	if (preferredCNHKURL) return preferredCNHKURL;
 	if (!shouldUseSignedAkamaiFallback(Settings)) return "";
+	const preferredAkamaiURL = urls.find(isSignedAkamaiURL);
+	if (preferredAkamaiURL) return preferredAkamaiURL;
 	const preferredOverseaURL = urls.find(isSignedOverseaVideoURL);
 	if (preferredOverseaURL) return preferredOverseaURL;
 	if (!isOverseaVideoHost(getURLHost(currentURL))) return "";
-	return urls.find(isSignedAkamaiURL) ?? "";
+	return "";
 }
 
 function reorderPreferredURL(values, preferredURL) {
