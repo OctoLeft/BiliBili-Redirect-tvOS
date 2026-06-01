@@ -7,6 +7,7 @@ import setENV from "./function/setENV.mjs";
 let $response = undefined;
 /***************** Processing *****************/
 // 解构URL
+const RAW_URL = $request.url;
 const url = new URL($request.url);
 Console.info(`url: ${url.toJSON()}`);
 // 获取连接参数
@@ -17,6 +18,7 @@ const FORMAT = ($request.headers?.["Content-Type"] ?? $request.headers?.["conten
 Console.info(`FORMAT: ${FORMAT}`);
 
 const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
+let preserveRawURL = false;
 
 function getHeaderKey(headers, name) {
 	const lowerName = name.toLowerCase();
@@ -79,6 +81,25 @@ function applyTVOSCNHKHeaders(Settings) {
 	deleteHeader($request.headers, "Referer");
 }
 
+function applyTVOSAkamaiHeaders(Settings) {
+	if (!$request.headers) $request.headers = {};
+	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
+	if (!getHeaderKey($request.headers, "Referer")) setHeader($request.headers, "Referer", "https://www.bilibili.com");
+}
+
+function isResponseOnlyMode(Settings) {
+	return (Settings.TVOS?.RedirectMode || "response-only") === "response-only";
+}
+
+function isSignedPlaybackURL(url) {
+	return url.pathname.startsWith("/upgcxcode/") && Boolean(url.searchParams.get("upsig"));
+}
+
+function preserveSignedPlaybackRequest(Settings) {
+	preserveRawURL = true;
+	applyTVOSAkamaiHeaders(Settings);
+}
+
 function isTVOSCNHKAkamaiURL(url, Settings) {
 	const host = Settings.Host?.AkamaiCNHK || "cn-hk-eq-01-03.bilivideo.com";
 	return (url.hostname === host || /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(url.hostname)) && url.searchParams.get("os") === "akam";
@@ -86,7 +107,10 @@ function isTVOSCNHKAkamaiURL(url, Settings) {
 
 function prepareTVOSAkamaiRequest(url, Settings) {
 	const redirectMode = Settings.TVOS?.RedirectMode || "response-only";
-	if (redirectMode === "response-only") return;
+	if (redirectMode === "response-only") {
+		preserveSignedPlaybackRequest(Settings);
+		return;
+	}
 
 	const signedParams = getSignedParamNames(url);
 	url.protocol = "http:";
@@ -228,7 +252,8 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 				case "upos-sz-mirroraliov.bilivideo.com": // 阿里云 CDN，海外
 				case "upos-sz-mirrorcosov.bilivideo.com": // 腾讯云 CDN，海外
 				case "upos-sz-mirrorhwov.bilivideo.com": // 华为云 CDN，海外
-					url.hostname = Settings.Host.OverseaVideo;
+					if (isResponseOnlyMode(Settings) && isSignedPlaybackURL(url)) preserveSignedPlaybackRequest(Settings);
+					else url.hostname = Settings.Host.OverseaVideo;
 					break;
 				case "upos-sz-mirroralibstar1.bilivideo.com": // 阿里云 CDN，海外（东南亚），其他类型的 CDN 应该不能替换为此 Host，但反过来可以。
 				case "upos-sz-mirrorcosbstar1.bilivideo.com": // 腾讯云 CDN，海外（东南亚），其他类型的 CDN 应该不能替换为此 Host，但反过来可以。
@@ -316,7 +341,7 @@ function prepareTVOSAkamaiRequest(url, Settings) {
 	if (!$request.headers) $request.headers = {};
 	setHeader($request.headers, "Host", url.host);
 	if ($request.headers?.[":authority"]) $request.headers[":authority"] = url.host;
-	$request.url = url.toString();
+	$request.url = preserveRawURL ? RAW_URL : url.toString();
 	Console.debug(`$request.url: ${$request.url}`);
 })()
 	.catch(e => Console.error(e))

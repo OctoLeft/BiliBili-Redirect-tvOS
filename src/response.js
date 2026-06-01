@@ -33,6 +33,44 @@ function getPreferredCNHKURL(values, Settings) {
 	return urls.find(value => getURLHost(value) === configuredHost) ?? urls.find(value => /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(getURLHost(value))) ?? "";
 }
 
+function isOverseaVideoHost(host) {
+	return [
+		"upos-sz-mirrorawsov.bilivideo.com",
+		"upos-sz-mirroraliov.bilivideo.com",
+		"upos-sz-mirrorcosov.bilivideo.com",
+		"upos-sz-mirrorhwov.bilivideo.com",
+	].includes(host);
+}
+
+function isSignedOverseaVideoURL(value) {
+	return isOverseaVideoHost(getURLHost(value));
+}
+
+function isSignedAkamaiURL(value) {
+	if (getURLHost(value) !== "upos-hz-mirrorakam.akamaized.net") return false;
+	try {
+		const candidate = new URL(value);
+		return candidate.searchParams.get("os") === "akam" && /[?&]hdnts=exp(?:=|%3D)\d+~hmac(?:=|%3D)/u.test(value);
+	} catch {
+		return false;
+	}
+}
+
+function shouldUseSignedAkamaiFallback(Settings) {
+	return (Settings.TVOS?.RedirectMode || "response-only") === "response-only";
+}
+
+function getPreferredPlaybackURL(currentURL, backupCandidates, Settings) {
+	const urls = [currentURL, ...backupCandidates].filter(value => typeof value === "string" && /^https?:\/\//u.test(value));
+	const preferredCNHKURL = getPreferredCNHKURL(urls, Settings);
+	if (preferredCNHKURL) return preferredCNHKURL;
+	if (!shouldUseSignedAkamaiFallback(Settings)) return "";
+	const preferredOverseaURL = urls.find(isSignedOverseaVideoURL);
+	if (preferredOverseaURL) return preferredOverseaURL;
+	if (!isOverseaVideoHost(getURLHost(currentURL))) return "";
+	return urls.find(isSignedAkamaiURL) ?? "";
+}
+
 function reorderPreferredURL(values, preferredURL) {
 	const urls = toArray(values);
 	if (!preferredURL) return urls;
@@ -53,7 +91,8 @@ function rewriteJSONNode(node, Settings) {
 		...toArray(node.backup_urls),
 		...toArray(node.backupUrls),
 	];
-	const preferredURL = getPreferredCNHKURL(backupCandidates, Settings);
+	const currentURL = ["base_url", "baseUrl", "url"].map(key => node[key]).find(value => typeof value === "string");
+	const preferredURL = getPreferredPlaybackURL(currentURL, backupCandidates, Settings);
 	if (preferredURL) {
 		for (const key of ["base_url", "baseUrl", "url"]) {
 			if (typeof node[key] === "string" && node[key] !== preferredURL) {
@@ -192,7 +231,7 @@ function rewriteStreamList(streamList = [], Settings) {
 		switch (stream?.content?.oneofKind) {
 			case "dashVideo": {
 				const video = stream.content.dashVideo;
-				const preferredURL = getPreferredCNHKURL(video.backupUrl ?? [], Settings);
+				const preferredURL = getPreferredPlaybackURL(video.baseUrl, video.backupUrl ?? [], Settings);
 				if (preferredURL && video.baseUrl !== preferredURL) {
 					video.baseUrl = preferredURL;
 					video.backupUrl = reorderPreferredURL(video.backupUrl, preferredURL);
@@ -203,7 +242,7 @@ function rewriteStreamList(streamList = [], Settings) {
 			case "segmentVideo":
 			case "SegmentVideo":
 				for (const segment of stream.content.segmentVideo?.segment ?? []) {
-					const preferredURL = getPreferredCNHKURL(segment.backupUrl ?? [], Settings);
+					const preferredURL = getPreferredPlaybackURL(segment.url, segment.backupUrl ?? [], Settings);
 					if (preferredURL && segment.url !== preferredURL) {
 						segment.url = preferredURL;
 						segment.backupUrl = reorderPreferredURL(segment.backupUrl, preferredURL);
@@ -226,7 +265,7 @@ function rewritePlayViewUnite(binaryBody, Settings) {
 	let rewriteCount = rewriteVodInfo(data.vodInfo, Settings);
 	for (const video of data.fragmentVideo?.videos ?? []) rewriteCount += rewriteVodInfo(video.vodInfo, Settings);
 	if (rewriteCount > 0) {
-		Console.info(`CNHK playurl rewrites: ${rewriteCount}`);
+		Console.info(`Signed playurl rewrites: ${rewriteCount}`);
 		return PlayViewUniteReply.toBinary(data);
 	}
 	return binaryBody;
@@ -252,7 +291,7 @@ function normalizeChangedBodyHeaders() {
 			const body = JSON.parse($response.body ?? "{}");
 			const rewriteCount = rewriteJSONNode(body, Settings);
 			if (rewriteCount > 0) {
-				Console.info(`CNHK JSON playurl rewrites: ${rewriteCount}`);
+				Console.info(`Signed JSON playurl rewrites: ${rewriteCount}`);
 				$response.body = JSON.stringify(body);
 				normalizeChangedBodyHeaders();
 			}

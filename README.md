@@ -8,4 +8,4 @@ Surge 模块导入地址：
 https://github.com/OctoLeft/BiliBili-Redirect-tvOS/releases/latest/download/BiliBili.Redirect.tvOS.sgmodule
 ```
 
-本 fork 优先在播放地址响应中选择服务端已签好的 CNHK backup URL；默认不会把 Akamai 签名的 m4s URL 强行改到 CNHK，因为这类 URL 会被 CNHK `bvc` 按签名拒绝。
+本 fork 默认保留服务端签发的可用播放 URL，并补齐 tvOS 分片请求需要的 `Referer`；不会把已签名 m4s URL 强行改写到其他 host，避免破坏 `hdnts`/`upsig` 导致 403。
