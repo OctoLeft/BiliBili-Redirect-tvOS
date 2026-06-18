@@ -313,11 +313,15 @@ async function runFreshPlayurlTest() {
 	if (ovBackupCount < 1) throw new Error("fresh playurl did not include oversea CDN backup");
 	if (hostOf(lane1Result.url) !== hostOf(requestResult.url)) throw new Error("fresh request host was not sticky across ranges");
 	if (!backupHosts.includes("upos-hz-mirrorakam.akamaized.net")) throw new Error("fresh playurl did not keep Akamai fallback");
+	if (!queryParamOf(rewrittenMediaURL, "buvid")) throw new Error("fresh playurl CNHK URL missing buvid");
 
 	const pcUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 	const pcUARequest = await runRequestScript(rewrittenMediaURL, "bytes=0-1023", { "User-Agent": pcUA });
+	const passThroughRequest = await runRequestScript(rewrittenMediaURL, "bytes=524288-525311", { "User-Agent": pcUA });
 	console.log(`fresh.request.uaPreserved=${getHeader(pcUARequest.headers, "User-Agent") === pcUA ? "true" : "false"}`);
+	console.log(`fresh.request.passThrough=${passThroughRequest.url === rewrittenMediaURL ? "true" : "false"}`);
 	if (getHeader(pcUARequest.headers, "User-Agent") !== pcUA) throw new Error("request script did not preserve client User-Agent");
+	if (passThroughRequest.url !== rewrittenMediaURL) throw new Error("ready CNHK playback URL was not passed through unchanged");
 
 	if (originalAkamaiURL) {
 		const fallbackResult = await runRequestScript(originalAkamaiURL);

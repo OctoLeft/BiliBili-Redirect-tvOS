@@ -47,7 +47,7 @@ http:
       type: response
       require-body: true
       argument:
-    - match: ^https?:\/\/.+\.bilivideo\.com\/upgcxcode\/
+    - match: ^https?:\/\/(?!cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com|upos-sz-mirrorawsov\.bilivideo\.com|upos-sz-mirroraliov\.bilivideo\.com|upos-sz-mirrorcosov\.bilivideo\.com|upos-sz-mirrorhwov\.bilivideo\.com).+\.bilivideo\.com\/upgcxcode\/
       name: "📺 BiliBili.Redirect.request"
       type: request
     - match: ^https?:\/\/[adbcefxy0-9]+\.mcdn\.bilivideo\.cn(:(8000|8082))?\/v1\/resource\/

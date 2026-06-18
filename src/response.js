@@ -10,6 +10,7 @@ const FORMAT = ($response.headers?.["Content-Type"] ?? $response.headers?.["cont
 const PATHs = url.pathname.split("/").filter(Boolean);
 const DEFAULT_CNHK_POOL = ["cn-hk-eq-01-03.bilivideo.com", "cn-hk-eq-01-13.bilivideo.com", "cn-hk-eq-01-12.bilivideo.com", "cn-hk-eq-01-01.bilivideo.com"];
 const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
+const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
 const TVOS_CNHK_PROBE_TIMEOUT = 1800;
 const PROBE_RANGE = "bytes=0-262143";
 const PROBE_BYTES = 262144;
@@ -42,6 +43,70 @@ function rewriteRawURLAuthority(rawURL, protocol, host) {
 function rawURLPathname(rawURL) {
 	const match = rawURL.match(/^[a-z][a-z\d+.-]*:\/\/[^/?#]+([^?#]*)/iu);
 	return match?.[1] ?? "";
+}
+
+function rawURLCacheScope(rawURL) {
+	const pathname = rawURLPathname(rawURL);
+	const match = pathname.match(/^(\/upgcxcode\/\d+\/\d+\/[^/]+\/)/u);
+	return match?.[1] ?? pathname;
+}
+
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function getRawQueryParam(rawURL, name) {
+	const match = rawURL.match(new RegExp(`[?&]${escapeRegExp(name)}=([^&#]*)`, "u"));
+	return match?.[1] ?? "";
+}
+
+function setRawQueryParam(rawURL, name, value) {
+	const hashIndex = rawURL.indexOf("#");
+	const hash = hashIndex >= 0 ? rawURL.slice(hashIndex) : "";
+	const urlWithoutHash = hashIndex >= 0 ? rawURL.slice(0, hashIndex) : rawURL;
+	const queryIndex = urlWithoutHash.indexOf("?");
+	const encodedValue = encodeURIComponent(value);
+	if (queryIndex < 0) return `${urlWithoutHash}?${encodeURIComponent(name)}=${encodedValue}${hash}`;
+
+	const beforeQuery = urlWithoutHash.slice(0, queryIndex + 1);
+	const query = urlWithoutHash.slice(queryIndex + 1);
+	const parts = query.split("&");
+	let changed = false;
+	for (let i = 0; i < parts.length; i++) {
+		const key = parts[i].split("=", 1)[0];
+		if (key === name) {
+			parts[i] = `${key}=${encodedValue}`;
+			changed = true;
+		}
+	}
+	if (!changed) parts.push(`${encodeURIComponent(name)}=${encodedValue}`);
+	return `${beforeQuery}${parts.join("&")}${hash}`;
+}
+
+function getRawSignedParamNames(rawURL) {
+	try {
+		const value = decodeURIComponent(getRawQueryParam(rawURL, "uparams"));
+		return new Set(value.split(",").filter(Boolean));
+	} catch {
+		return new Set(getRawQueryParam(rawURL, "uparams").split(",").filter(Boolean));
+	}
+}
+
+function randomAlphaNumeric(length) {
+	const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	let value = "";
+	for (let i = 0; i < length; i++) value += chars[Math.floor(Math.random() * chars.length)];
+	return value;
+}
+
+function getTVOSBuvid(Settings) {
+	const configuredBuvid = Settings.TVOS?.Buvid?.trim();
+	if (configuredBuvid) return configuredBuvid;
+	const cachedBuvid = readPersistentValue(TVOS_BUVID_CACHE_KEY);
+	if (cachedBuvid) return cachedBuvid;
+	const generatedBuvid = `YF${randomAlphaNumeric(42)}`;
+	writePersistentValue(TVOS_BUVID_CACHE_KEY, generatedBuvid);
+	return generatedBuvid;
 }
 
 function isCNHKHost(host) {
@@ -91,14 +156,15 @@ function writePersistentValue(key, value) {
 function writeCNHKProbeCache(rawURL, hosts) {
 	try {
 		const pathname = rawURLPathname(rawURL);
+		const scope = rawURLCacheScope(rawURL);
 		const currentValue = readPersistentValue(TVOS_CNHK_PROBE_CACHE_KEY);
 		const currentCache = currentValue ? JSON.parse(currentValue) : {};
 		const entries = Array.isArray(currentCache.entries) ? currentCache.entries : [];
 		const nextEntries = [
-			{ pathname, hosts },
-			...entries.filter(entry => entry?.pathname !== pathname),
+			{ pathname, scope, hosts },
+			...entries.filter(entry => entry?.pathname !== pathname && entry?.scope !== scope),
 		].slice(0, 20);
-		writePersistentValue(TVOS_CNHK_PROBE_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), pathname, hosts, entries: nextEntries }));
+		writePersistentValue(TVOS_CNHK_PROBE_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), pathname, scope, hosts, entries: nextEntries }));
 	} catch (e) {
 		Console.warn(`写入 CNHK 节点缓存失败: ${e}`);
 	}
@@ -157,8 +223,13 @@ function getCNHKMinThroughput(Settings) {
 	return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CNHK_MIN_THROUGHPUT;
 }
 
-function buildCNHKURL(rawURL, host) {
-	return rewriteRawURLAuthority(rawURL, "http:", host);
+function buildCNHKURL(rawURL, host, Settings) {
+	const signedParams = getRawSignedParamNames(rawURL);
+	let nextURL = rewriteRawURLAuthority(rawURL, "http:", host);
+	if (!signedParams.has("buvid") && !getRawQueryParam(nextURL, "buvid")) nextURL = setRawQueryParam(nextURL, "buvid", getTVOSBuvid(Settings));
+	const build = getRawQueryParam(nextURL, "build");
+	if (!signedParams.has("build") && (!build || build === "0")) nextURL = setRawQueryParam(nextURL, "build", Settings.TVOS?.Build || "89600100");
+	return nextURL;
 }
 
 function timeoutAfter(ms) {
@@ -211,7 +282,7 @@ async function probeMediaURL(url, index, Settings) {
 }
 
 async function probeCNHKHost(rawURL, host, index, Settings) {
-	const result = await probeMediaURL(buildCNHKURL(rawURL, host), index, Settings);
+	const result = await probeMediaURL(buildCNHKURL(rawURL, host, Settings), index, Settings);
 	return result ? { ...result, host } : null;
 }
 
@@ -242,7 +313,7 @@ async function getRankedCNHKProbes(rawURL, Settings) {
 				duration: Number.POSITIVE_INFINITY,
 				throughput: 0,
 				status: 0,
-				url: buildCNHKURL(rawURL, host),
+				url: buildCNHKURL(rawURL, host, Settings),
 			}));
 		})();
 	}
@@ -266,7 +337,7 @@ function shouldPreferCNHK(bestHKProbe, overseaProbe, Settings) {
 
 async function buildAdaptiveCNHKPlaybackPlan(signedAkamaiURL, overseaURL, rankedProbes, Settings) {
 	const rankedHosts = rankedProbes.map(result => result.host);
-	const hkURLs = unique(rankedHosts.map(host => buildCNHKURL(signedAkamaiURL, host)));
+	const hkURLs = unique(rankedHosts.map(host => buildCNHKURL(signedAkamaiURL, host, Settings)));
 	if (!hkURLs.length) return null;
 
 	const bestHKProbe = rankedProbes[0];

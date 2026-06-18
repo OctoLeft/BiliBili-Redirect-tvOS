@@ -19,9 +19,12 @@ Console.info(`FORMAT: ${FORMAT}`);
 
 const TVOS_BUVID_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.Buvid";
 const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
-const TVOS_CNHK_PROBE_CACHE_TTL = 10 * 60 * 1000;
+const TVOS_CNHK_STICKY_HOST_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKStickyHost";
+const TVOS_CNHK_PROBE_CACHE_TTL = 30 * 60 * 1000;
+const TVOS_CNHK_STICKY_HOST_TTL = 30 * 60 * 1000;
 let preserveRawURL = false;
 let finalRawURL = "";
+let passthroughRequest = false;
 
 function getHeaderKey(headers, name) {
 	const lowerName = name.toLowerCase();
@@ -138,21 +141,54 @@ function getFallbackCNHKHost(Settings) {
 	return isCNHKHost(configuredHost) ? configuredHost : "cn-hk-eq-01-03.bilivideo.com";
 }
 
+function rawURLCacheScope(rawURL) {
+	const pathname = rawURLPathname(rawURL);
+	const match = pathname.match(/^(\/upgcxcode\/\d+\/\d+\/[^/]+\/)/u);
+	return match?.[1] ?? pathname;
+}
+
+function readStickyCNHKHost() {
+	try {
+		const value = readPersistentValue(TVOS_CNHK_STICKY_HOST_KEY);
+		if (!value) return "";
+		const cache = JSON.parse(value);
+		if (Date.now() - Number(cache.updatedAt ?? 0) > TVOS_CNHK_STICKY_HOST_TTL) return "";
+		return isCNHKHost(cache.host) ? cache.host : "";
+	} catch (e) {
+		Console.warn(`读取 CNHK 粘性主机失败: ${e}`);
+		return "";
+	}
+}
+
+function writeStickyCNHKHost(host) {
+	if (!isCNHKHost(host)) return;
+	try {
+		writePersistentValue(TVOS_CNHK_STICKY_HOST_KEY, JSON.stringify({ host, updatedAt: Date.now() }));
+	} catch (e) {
+		Console.warn(`写入 CNHK 粘性主机失败: ${e}`);
+	}
+}
+
 function readCachedCNHKHosts(rawURL) {
 	try {
 		const value = readPersistentValue(TVOS_CNHK_PROBE_CACHE_KEY);
-		if (!value) return [];
-		const cache = JSON.parse(value);
-		if (Date.now() - Number(cache.updatedAt ?? 0) > TVOS_CNHK_PROBE_CACHE_TTL) return [];
 		const pathname = rawURLPathname(rawURL);
+		const scope = rawURLCacheScope(rawURL);
+		const stickyHost = readStickyCNHKHost();
+		if (!value) return stickyHost ? [stickyHost] : [];
+
+		const cache = JSON.parse(value);
+		if (Date.now() - Number(cache.updatedAt ?? 0) > TVOS_CNHK_PROBE_CACHE_TTL) return stickyHost ? [stickyHost] : [];
+
 		const entries = Array.isArray(cache.entries) ? cache.entries : [];
-		const entry = entries.find(item => item?.pathname === pathname);
-		if (entry) return Array.isArray(entry.hosts) ? entry.hosts.filter(isCNHKHost) : [];
-		if (cache.pathname === pathname) return Array.isArray(cache.hosts) ? cache.hosts.filter(isCNHKHost) : [];
-		return [];
+		const entry = entries.find(item => item?.pathname === pathname || item?.scope === scope);
+		const hosts = entry ? (Array.isArray(entry.hosts) ? entry.hosts.filter(isCNHKHost) : []) : [];
+		if (hosts.length) return hosts;
+		if (cache.pathname === pathname || cache.scope === scope) return Array.isArray(cache.hosts) ? cache.hosts.filter(isCNHKHost) : [];
+		return stickyHost ? [stickyHost] : [];
 	} catch (e) {
 		Console.warn(`读取 CNHK 节点缓存失败: ${e}`);
-		return [];
+		return readStickyCNHKHost() ? [readStickyCNHKHost()] : [];
 	}
 }
 
@@ -204,8 +240,17 @@ function isTVOSCNHKAkamaiURL(url, Settings) {
 	return isCNHKHost(url.hostname) && url.searchParams.get("os") === "akam";
 }
 
+function isReadyCNHKPlaybackURL(url, rawURL) {
+	if (!isCNHKHost(url.hostname) || url.searchParams.get("os") !== "akam") return false;
+	const buvid = getRawQueryParam(rawURL, "buvid") || url.searchParams.get("buvid");
+	const build = getRawQueryParam(rawURL, "build") || url.searchParams.get("build");
+	return Boolean(buvid) && Boolean(build && build !== "0");
+}
+
 function prepareTVOSAkamaiRequest(Settings) {
-	const akamaiURL = buildTVOSCNHKURL(RAW_URL, Settings, getRequestCNHKHost(Settings));
+	const host = getRequestCNHKHost(Settings);
+	writeStickyCNHKHost(host);
+	const akamaiURL = buildTVOSCNHKURL(RAW_URL, Settings, host);
 	setFinalRawURL(akamaiURL);
 	applyTVOSCNHKHeaders(Settings);
 }
@@ -303,6 +348,12 @@ function buildTVOSCNHKURL(rawURL, Settings, host) {
 		case "HEAD":
 		case "OPTIONS":
 		default:
+			if (isReadyCNHKPlaybackURL(url, RAW_URL)) {
+				Console.debug("CNHK playback pass-through");
+				writeStickyCNHKHost(url.hostname);
+				passthroughRequest = true;
+				break;
+			}
 			// 主机判断
 			switch (url.hostname) {
 				case "upos-sz-mirrorali.bilivideo.com": // 阿里云 CDN
@@ -337,7 +388,9 @@ function buildTVOSCNHKURL(rawURL, Settings, host) {
 					break;
 				default:
 					if (isTVOSCNHKAkamaiURL(url, Settings)) {
-						setFinalRawURL(buildTVOSCNHKURL(RAW_URL, Settings, getRequestCNHKHostForCurrentURL(Settings, url.hostname)));
+						const host = getRequestCNHKHostForCurrentURL(Settings, url.hostname);
+						writeStickyCNHKHost(host);
+						setFinalRawURL(buildTVOSCNHKURL(RAW_URL, Settings, host));
 						applyTVOSCNHKHeaders(Settings);
 					}
 					switch (url.port) {
@@ -415,13 +468,15 @@ function buildTVOSCNHKURL(rawURL, Settings, host) {
 		case "TRACE":
 			break;
 	}
-	if (!$request.headers) $request.headers = {};
-	const finalURL = finalRawURL || (preserveRawURL ? RAW_URL : url.toString());
-	const finalHost = finalRawURL ? rawURLHost(finalRawURL) : url.host;
-	setHeader($request.headers, "Host", finalHost);
-	if ($request.headers?.[":authority"]) $request.headers[":authority"] = finalHost;
-	$request.url = finalURL;
-	Console.debug(`$request.url: ${$request.url}`);
+	if (!passthroughRequest) {
+		if (!$request.headers) $request.headers = {};
+		const finalURL = finalRawURL || (preserveRawURL ? RAW_URL : url.toString());
+		const finalHost = finalRawURL ? rawURLHost(finalRawURL) : url.host;
+		setHeader($request.headers, "Host", finalHost);
+		if ($request.headers?.[":authority"]) $request.headers[":authority"] = finalHost;
+		$request.url = finalURL;
+		Console.debug(`$request.url: ${$request.url}`);
+	}
 })()
 	.catch(e => Console.error(e))
 	.finally(() => {
