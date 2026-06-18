@@ -53,6 +53,35 @@ function isCNHKHost(host) {
 	return /^cn-hk-eq-\d{2}-\d{2}\.bilivideo\.com$/u.test(host);
 }
 
+function isOverseaVideoHost(host) {
+	return [
+		"upos-sz-mirrorawsov.bilivideo.com",
+		"upos-sz-mirroraliov.bilivideo.com",
+		"upos-sz-mirrorcosov.bilivideo.com",
+		"upos-sz-mirrorhwov.bilivideo.com",
+	].includes(host);
+}
+
+const CNHK_OV_THROUGHPUT_RATIO = 0.7;
+
+function shouldPreferCNHK(bestHKProbe, overseaProbe, minThroughput) {
+	if (!bestHKProbe || bestHKProbe.status !== 206) return false;
+	if (bestHKProbe.throughput >= minThroughput) return true;
+	if (!overseaProbe || overseaProbe.status !== 206) return true;
+	return bestHKProbe.throughput >= overseaProbe.throughput * CNHK_OV_THROUGHPUT_RATIO;
+}
+
+function runColdFallbackDecisionTest() {
+	const minThroughput = 262144;
+	if (shouldPreferCNHK({ status: 206, throughput: 10000 }, { status: 206, throughput: 500000 }, minThroughput)) {
+		throw new Error("cold fallback decision should prefer oversea CDN");
+	}
+	if (!shouldPreferCNHK({ status: 206, throughput: 500000 }, { status: 206, throughput: 100000 }, minThroughput)) {
+		throw new Error("warm cache decision should prefer CNHK");
+	}
+	console.log("cold.decision=passed");
+}
+
 function isMediaURL(value) {
 	return typeof value === "string" && /^https?:\/\//u.test(value) && value.includes("/upgcxcode/");
 }
@@ -187,7 +216,7 @@ async function runResponseScript(apiURL, bodyText) {
 	});
 }
 
-async function runRequestScript(inputURL, range = "bytes=0-1023") {
+async function runRequestScript(inputURL, range = "bytes=0-1023", extraHeaders = {}) {
 	const requestURL = new URL(inputURL);
 	const result = await runSurgeBundle(requestBundle, {
 		$request: {
@@ -198,6 +227,7 @@ async function runRequestScript(inputURL, range = "bytes=0-1023") {
 				Referer: defaultReferer,
 				Range: range,
 				"User-Agent": "Bilibili Freedoooooom/MarkII",
+				...extraHeaders,
 			},
 		},
 	});
@@ -256,10 +286,12 @@ async function runFreshPlayurlTest() {
 	const lane1Probe = await probeURL(lane1Result.url, lane1Result.headers, lane1Range);
 	const backupHosts = rewrittenMediaEntry.backups.map(hostOf);
 	const cnhkBackupCount = backupHosts.filter(isCNHKHost).length;
+	const ovBackupCount = backupHosts.filter(isOverseaVideoHost).length;
 
 	console.log(`fresh.playurl.before=${hostOf(originalMediaURL)}`);
 	console.log(`fresh.playurl.after=${hostOf(rewrittenMediaURL)}`);
 	console.log(`fresh.playurl.backupCNHK=${cnhkBackupCount}`);
+	console.log(`fresh.playurl.backupOV=${ovBackupCount}`);
 	console.log(`fresh.playurl.backupAkamai=${backupHosts.includes("upos-hz-mirrorakam.akamaized.net") ? "true" : "false"}`);
 	console.log(`fresh.request.final=${hostOf(requestResult.url)}`);
 	console.log(`fresh.request.status=${probe.status}`);
@@ -278,8 +310,14 @@ async function runFreshPlayurlTest() {
 	if (!isCNHKHost(hostOf(requestResult.url))) throw new Error("fresh final request was not CNHK");
 	if (!isCNHKHost(hostOf(lane1Result.url))) throw new Error("fresh sticky range final request was not CNHK");
 	if (cnhkBackupCount < 2) throw new Error("fresh playurl did not include enough CNHK backups");
+	if (ovBackupCount < 1) throw new Error("fresh playurl did not include oversea CDN backup");
 	if (hostOf(lane1Result.url) !== hostOf(requestResult.url)) throw new Error("fresh request host was not sticky across ranges");
 	if (!backupHosts.includes("upos-hz-mirrorakam.akamaized.net")) throw new Error("fresh playurl did not keep Akamai fallback");
+
+	const pcUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+	const pcUARequest = await runRequestScript(rewrittenMediaURL, "bytes=0-1023", { "User-Agent": pcUA });
+	console.log(`fresh.request.uaPreserved=${getHeader(pcUARequest.headers, "User-Agent") === pcUA ? "true" : "false"}`);
+	if (getHeader(pcUARequest.headers, "User-Agent") !== pcUA) throw new Error("request script did not preserve client User-Agent");
 
 	if (originalAkamaiURL) {
 		const fallbackResult = await runRequestScript(originalAkamaiURL);
@@ -320,5 +358,6 @@ async function runProvidedURLTest() {
 	}
 }
 
+await runColdFallbackDecisionTest();
 await runFreshPlayurlTest();
 await runProvidedURLTest();

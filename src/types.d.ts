@@ -141,6 +141,28 @@ export interface Settings {
          * @defaultValue ""
          */
         Buvid?: string;
+    /**
+         * [tvOS] CNHK 最低吞吐 (Bps)
+         *
+         * 启动测速时 HK 节点被视为命中缓存的最低吞吐（字节/秒）。低于此值且显著慢于海外 CDN 时，将回退到 *ov 作 primary。
+         *
+         * @defaultValue "262144"
+         */
+        CNHKMinThroughput?: string;
+    /**
+         * [tvOS] 强制使用 tvOS User-Agent
+         *
+         * 开启后忽略客户端原始 User-Agent，始终使用上方配置的 tvOS User-Agent。
+         *
+         * @remarks
+         *
+         * Possible values:
+         * - `'true'` - 开启
+         * - `'false'` - 关闭
+         *
+         * @defaultValue "false"
+         */
+        ForceUserAgent?: 'true' | 'false';
 };
     /**
      * [储存] 配置类型

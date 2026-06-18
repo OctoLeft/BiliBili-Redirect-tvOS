@@ -166,16 +166,25 @@ function getRequestCNHKHostForCurrentURL(Settings, currentHost) {
 	return currentHost;
 }
 
+function isTruthySetting(value) {
+	return value === true || value === "true" || value === "1";
+}
+
+function getPlaybackUserAgent(Settings) {
+	const headerKey = getHeaderKey($request.headers, "User-Agent");
+	const requestUA = headerKey ? String($request.headers[headerKey] ?? "").trim() : "";
+	if (requestUA && !isTruthySetting(Settings.TVOS?.ForceUserAgent)) return requestUA;
+	return Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII";
+}
+
 function applyTVOSCNHKHeaders(Settings) {
 	if (!$request.headers) $request.headers = {};
-	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
+	setHeader($request.headers, "User-Agent", getPlaybackUserAgent(Settings));
 	if (!getHeaderKey($request.headers, "Referer")) setHeader($request.headers, "Referer", "https://www.bilibili.com");
 }
 
 function applyTVOSAkamaiHeaders(Settings) {
-	if (!$request.headers) $request.headers = {};
-	setHeader($request.headers, "User-Agent", Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII");
-	if (!getHeaderKey($request.headers, "Referer")) setHeader($request.headers, "Referer", "https://www.bilibili.com");
+	applyTVOSCNHKHeaders(Settings);
 }
 
 function isResponseOnlyMode() {

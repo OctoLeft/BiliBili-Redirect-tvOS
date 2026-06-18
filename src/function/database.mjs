@@ -13,6 +13,8 @@ export default {
 				Build: "89600100",
 				UserAgent: "Bilibili Freedoooooom/MarkII",
 				Buvid: "",
+				CNHKMinThroughput: "262144",
+				ForceUserAgent: false,
 			},
 		},
 	},

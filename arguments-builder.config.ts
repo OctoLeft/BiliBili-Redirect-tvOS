@@ -159,6 +159,25 @@ export default defineConfig({
 			description: "可选。留空时脚本会在本机生成并持久化随机 buvid。",
 		},
 		{
+			key: "TVOS.CNHKMinThroughput",
+			name: "[tvOS] CNHK 最低吞吐 (Bps)",
+			defaultValue: "262144",
+			type: "string",
+			description: "启动测速时 HK 节点被视为命中缓存的最低吞吐（字节/秒）。低于此值且显著慢于海外 CDN 时，将回退到 *ov 作 primary。",
+		},
+		{
+			key: "TVOS.ForceUserAgent",
+			name: "[tvOS] 强制使用 tvOS User-Agent",
+			defaultValue: "false",
+			type: "string",
+			boxJsType: "boolean",
+			description: "开启后忽略客户端原始 User-Agent，始终使用上方配置的 tvOS User-Agent。",
+			options: [
+				{ key: "true", label: "开启" },
+				{ key: "false", label: "关闭" },
+			],
+		},
+		{
 			key: "Host.BStar",
 			name: "[主机名] 重定向 BStar CDN (国际版)",
 			defaultValue: "upos-sz-mirrorali.bilivideo.com",

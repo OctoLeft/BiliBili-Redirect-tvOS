@@ -11,6 +11,10 @@ const PATHs = url.pathname.split("/").filter(Boolean);
 const DEFAULT_CNHK_POOL = ["cn-hk-eq-01-03.bilivideo.com", "cn-hk-eq-01-13.bilivideo.com", "cn-hk-eq-01-12.bilivideo.com", "cn-hk-eq-01-01.bilivideo.com"];
 const TVOS_CNHK_PROBE_CACHE_KEY = "@BiliBili.Redirect.Caches.tvOS.CNHKProbe";
 const TVOS_CNHK_PROBE_TIMEOUT = 1800;
+const PROBE_RANGE = "bytes=0-262143";
+const PROBE_BYTES = 262144;
+const DEFAULT_CNHK_MIN_THROUGHPUT = 262144;
+const CNHK_OV_THROUGHPUT_RATIO = 0.7;
 let cnhkProbePromise = null;
 
 function isObject(value) {
@@ -133,6 +137,26 @@ function shouldUseSignedAkamaiFallback(Settings) {
 	return true;
 }
 
+function isTruthySetting(value) {
+	return value === true || value === "true" || value === "1";
+}
+
+function getHeaderValue(headers, name) {
+	const key = Object.keys(headers ?? {}).find(item => item.toLowerCase() === name.toLowerCase());
+	return key ? String(headers[key] ?? "") : "";
+}
+
+function getProbeUserAgent(Settings) {
+	const requestUA = getHeaderValue($request?.headers, "User-Agent").trim();
+	if (requestUA && !isTruthySetting(Settings.TVOS?.ForceUserAgent)) return requestUA;
+	return Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII";
+}
+
+function getCNHKMinThroughput(Settings) {
+	const configured = Number(Settings.TVOS?.CNHKMinThroughput);
+	return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CNHK_MIN_THROUGHPUT;
+}
+
 function buildCNHKURL(rawURL, host) {
 	return rewriteRawURLAuthority(rawURL, "http:", host);
 }
@@ -143,59 +167,127 @@ function timeoutAfter(ms) {
 	});
 }
 
-async function probeCNHKHost(rawURL, host, index, Settings) {
+function getProbeHeaders(Settings) {
+	return {
+		Accept: "application/octet-stream",
+		Range: PROBE_RANGE,
+		"User-Agent": getProbeUserAgent(Settings),
+		Referer: "https://www.bilibili.com",
+	};
+}
+
+function buildProbeResult(url, index, startedAt, status, bytes = PROBE_BYTES) {
+	const duration = Math.max(Date.now() - startedAt, 1);
+	return {
+		url,
+		host: getURLHost(url),
+		index,
+		duration,
+		throughput: bytes / (duration / 1000),
+		status,
+	};
+}
+
+async function probeMediaURL(url, index, Settings) {
 	const startedAt = Date.now();
 	try {
 		const response = await Promise.race([
-			fetch(buildCNHKURL(rawURL, host), {
+			fetch(url, {
 				method: "GET",
-				headers: {
-					Accept: "application/octet-stream",
-					Range: "bytes=0-65535",
-					"User-Agent": Settings.TVOS?.UserAgent || "Bilibili Freedoooooom/MarkII",
-					Referer: "https://www.bilibili.com",
-				},
+				headers: getProbeHeaders(Settings),
 				redirection: false,
 				timeout: 2,
 			}),
 			timeoutAfter(TVOS_CNHK_PROBE_TIMEOUT),
 		]);
+		if (response?.timeout) return null;
 		const status = response?.status ?? response?.statusCode;
 		if (status !== 206) return null;
-		return { host, index, duration: Date.now() - startedAt };
+		return buildProbeResult(url, index, startedAt, status);
 	} catch (e) {
-		Console.debug(`CNHK probe failed: ${host} ${e}`);
+		Console.debug(`Media probe failed: ${getURLHost(url)} ${e}`);
 		return null;
 	}
 }
 
-async function getRankedCNHKHosts(rawURL, Settings) {
+async function probeCNHKHost(rawURL, host, index, Settings) {
+	const result = await probeMediaURL(buildCNHKURL(rawURL, host), index, Settings);
+	return result ? { ...result, host } : null;
+}
+
+async function probeOverseaURL(overseaURL, Settings) {
+	return probeMediaURL(overseaURL, 0, Settings);
+}
+
+function sortProbeResults(probes) {
+	return probes
+		.filter(Boolean)
+		.sort((a, b) => (Math.abs(a.throughput - b.throughput) <= 1024 ? a.index - b.index : b.throughput - a.throughput));
+}
+
+async function getRankedCNHKProbes(rawURL, Settings) {
 	if (!cnhkProbePromise) {
 		cnhkProbePromise = (async () => {
 			const pool = getCNHKPool(Settings);
 			const probes = await Promise.all(pool.map((host, index) => probeCNHKHost(rawURL, host, index, Settings)));
-			const ranked = probes
-				.filter(Boolean)
-				.sort((a, b) => (Math.abs(a.duration - b.duration) <= 50 ? a.index - b.index : a.duration - b.duration))
-				.map(result => result.host);
+			const ranked = sortProbeResults(probes);
 			if (ranked.length) {
-				Console.info(`Fastest CNHK hosts: ${ranked.join(", ")}`);
+				Console.info(`Fastest CNHK hosts: ${ranked.map(result => `${result.host}@${Math.round(result.throughput)}Bps`).join(", ")}`);
 				return ranked;
 			}
 			const fallbackHost = getFallbackCNHKHost(Settings);
-			return unique([fallbackHost, ...pool]);
+			return unique([fallbackHost, ...pool]).map((host, index) => ({
+				host,
+				index,
+				duration: Number.POSITIVE_INFINITY,
+				throughput: 0,
+				status: 0,
+				url: buildCNHKURL(rawURL, host),
+			}));
 		})();
 	}
 	return cnhkProbePromise;
 }
 
-function buildCNHKPlaybackPlan(rawURL, rankedHosts) {
-	const hkURLs = unique(rankedHosts.map(host => buildCNHKURL(rawURL, host)));
+function selectBestOverseaURL(urls) {
+	const overseaURLs = urls.filter(isSignedOverseaVideoURL);
+	if (!overseaURLs.length) return "";
+	const preferredHost = "upos-sz-mirroraliov.bilivideo.com";
+	return overseaURLs.find(value => getURLHost(value) === preferredHost) ?? overseaURLs[0];
+}
+
+function shouldPreferCNHK(bestHKProbe, overseaProbe, Settings) {
+	if (!bestHKProbe || bestHKProbe.status !== 206) return false;
+	const minThroughput = getCNHKMinThroughput(Settings);
+	if (bestHKProbe.throughput >= minThroughput) return true;
+	if (!overseaProbe || overseaProbe.status !== 206) return true;
+	return bestHKProbe.throughput >= overseaProbe.throughput * CNHK_OV_THROUGHPUT_RATIO;
+}
+
+async function buildAdaptiveCNHKPlaybackPlan(signedAkamaiURL, overseaURL, rankedProbes, Settings) {
+	const rankedHosts = rankedProbes.map(result => result.host);
+	const hkURLs = unique(rankedHosts.map(host => buildCNHKURL(signedAkamaiURL, host)));
 	if (!hkURLs.length) return null;
-	writeCNHKProbeCache(rawURL, rankedHosts);
+
+	const bestHKProbe = rankedProbes[0];
+	const overseaProbe = overseaURL ? await probeOverseaURL(overseaURL, Settings) : null;
+	const preferCNHK = shouldPreferCNHK(bestHKProbe, overseaProbe, Settings);
+	writeCNHKProbeCache(signedAkamaiURL, rankedHosts);
+
+	const backupExtras = unique([signedAkamaiURL, overseaURL].filter(Boolean));
+	if (preferCNHK) {
+		Console.info(`Playback primary: CNHK ${bestHKProbe.host} (${Math.round(bestHKProbe.throughput)} Bps)`);
+		return {
+			primary: hkURLs[0],
+			backups: unique([...hkURLs.slice(1), ...backupExtras]),
+		};
+	}
+
+	const primary = overseaURL || signedAkamaiURL;
+	Console.info(`Playback primary: oversea ${getURLHost(primary)} (CNHK cold/slow: ${Math.round(bestHKProbe.throughput)} Bps)`);
 	return {
-		primary: hkURLs[0],
-		backups: unique([...hkURLs.slice(1), rawURL]),
+		primary,
+		backups: unique([...hkURLs, signedAkamaiURL, ...backupExtras.filter(value => value !== primary)]),
 	};
 }
 
@@ -213,7 +305,10 @@ async function getPreferredPlaybackPlan(currentURL, backupCandidates, Settings) 
 	const urls = [currentURL, ...backupCandidates].filter(value => typeof value === "string" && /^https?:\/\//u.test(value));
 	if (shouldUseSignedAkamaiFallback(Settings)) {
 		const signedAkamaiURL = urls.find(isSignedAkamaiURL);
-		if (signedAkamaiURL) return buildCNHKPlaybackPlan(signedAkamaiURL, await getRankedCNHKHosts(signedAkamaiURL, Settings));
+		if (signedAkamaiURL) {
+			const overseaURL = selectBestOverseaURL(urls);
+			return buildAdaptiveCNHKPlaybackPlan(signedAkamaiURL, overseaURL, await getRankedCNHKProbes(signedAkamaiURL, Settings), Settings);
+		}
 	}
 	return getFallbackPlaybackPlan(currentURL, backupCandidates, Settings);
 }
